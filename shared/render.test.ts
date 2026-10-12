@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DIFF_CONTEXT,
+  copyText,
   diffFoldLabel,
   diffRows,
   diffStats,
@@ -594,5 +595,28 @@ describe("renderMessage system turns", () => {
     expect(renderMessage(sys("<task-notification>x</task-notification>")).html).toContain(
       "&lt;task-notification&gt;",
     );
+  });
+});
+
+describe("copyText", () => {
+  it("copies raw markdown, joining text parts and skipping thinking", () => {
+    expect(
+      copyText([
+        { type: "thinking", text: "hmm" },
+        { type: "text", text: "# Title\n\n- **a**\n" },
+        { type: "text", text: "`code`" },
+      ]),
+    ).toBe("# Title\n\n- **a**\n\n`code`");
+  });
+  it("falls back to thinking when that's all there is", () => {
+    expect(copyText([{ type: "thinking", text: " deep thought " }])).toBe("deep thought");
+  });
+  it("names images instead of linking their auth-gated url", () => {
+    expect(
+      copyText([
+        { type: "text", text: "see" },
+        { type: "image", id: "x", mediaType: "image/png", name: "a.png", url: "/api/upload/x" },
+      ]),
+    ).toBe("see\n\n[image: a.png]");
   });
 });
