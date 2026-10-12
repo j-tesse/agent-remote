@@ -1764,6 +1764,55 @@ body {
   background: var(--raised);
 }
 
+/* Floating copy button in a bubble's top-right corner; hover-only (touch gets
+   it on tap via sticky :hover), plus focus so keyboard users can reach it. */
+.chat-bubble {
+  position: relative;
+}
+.chat-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--raised);
+  border-radius: var(--r-md);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.12s,
+    color 0.12s;
+}
+.chat-bubble:hover > .chat-copy,
+.chat-copy:focus-visible,
+.chat-copy[data-state="ok"],
+.chat-copy[data-state="fail"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+.chat-copy:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--raised));
+}
+.chat-copy:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.chat-copy[data-state="ok"] {
+  color: var(--success);
+}
+.chat-copy[data-state="fail"] {
+  color: var(--danger);
+}
+
 /* Rewind picker / confirmation (reuses the resume-dialog shell). */
 .rewind-dialog .resume-dialog-body {
   gap: 10px;

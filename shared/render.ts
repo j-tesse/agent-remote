@@ -563,6 +563,23 @@ export function groupParts(parts: ChatPart[]): PartGroup[] {
   return groups;
 }
 
+/** What a bubble's copy button puts on the clipboard: the raw markdown, not the
+ * rendered HTML. Thinking is skipped unless it's all the bubble holds; images
+ * become a `[image: name]` placeholder (their URL is auth-gated, useless elsewhere). */
+export function copyText(parts: ChatPart[]): string {
+  const pick = (types: ChatPart["type"][]) =>
+    parts
+      .flatMap((p) => {
+        if (!types.includes(p.type)) return [];
+        if (p.type === "text" || p.type === "thinking") return [p.text.trim()];
+        if (p.type === "image") return [`[image: ${p.name ?? "image"}]`];
+        return [];
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  return pick(["text", "image"]) || pick(["thinking"]);
+}
+
 /** A page of prose, for the collapsed thinking summary's unit switch. */
 export const WORDS_PER_PAGE = 500;
 /** Past this many pages a word count stops being at a glance readable, so count

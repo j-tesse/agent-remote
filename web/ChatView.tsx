@@ -26,6 +26,7 @@ import type {
 } from "../shared/protocol";
 import {
   agentPrompt,
+  copyText,
   diffFoldLabel,
   groupParts,
   renderMarkdown,
@@ -262,6 +263,92 @@ function ToolPart({
   );
 }
 
+/** Clipboard write that also works over plain http (LAN access), where
+ * navigator.clipboard is undefined outside a secure context. */
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall through to the legacy path
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  ta.remove();
+  return ok;
+}
+
+/** Floating hover-only copy button in a bubble's corner (see copyText). */
+function CopyButton({ parts }: { parts: ChatPart[] }) {
+  const [state, setState] = useState<"idle" | "ok" | "fail">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const text = copyText(parts);
+  if (!text) return null;
+  const label = state === "ok" ? "Copied" : state === "fail" ? "Copy failed" : "Copy message";
+  return (
+    <button
+      type="button"
+      className="chat-copy"
+      data-state={state}
+      aria-label={label}
+      title={label}
+      onClick={async (e) => {
+        e.stopPropagation();
+        const ok = await writeClipboard(text);
+        setState(ok ? "ok" : "fail");
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setState("idle"), 1200);
+      }}
+    >
+      {state === "ok" ? (
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            d="M3 8.5l3 3 7-7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+          <rect
+            x="5.5"
+            y="5.5"
+            width="8"
+            height="8"
+            rx="1.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+          />
+          <path
+            d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+          />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function Bubble({
   message,
   streaming,
@@ -298,6 +385,7 @@ function Bubble({
           </button>
         )}
         <div className="chat-bubble user">
+          <CopyButton parts={message.parts} />
           {text && <Markdown text={text} />}
           {images.length > 0 && (
             <div className="chat-bubble-images">
@@ -334,6 +422,7 @@ function Bubble({
           <ToolPart key={group.key} part={group.part} standalone />
         ) : (
           <div key={group.key} className="chat-bubble assistant">
+            {!streaming && <CopyButton parts={group.parts} />}
             {group.parts.map((part, i) => (
               <ProsePart
                 key={i}
