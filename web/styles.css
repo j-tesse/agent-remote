@@ -1792,11 +1792,26 @@ body {
     color 0.12s;
 }
 .chat-bubble:hover > .chat-copy,
+.chat-code:hover > .chat-copy,
 .chat-copy:focus-visible,
 .chat-copy[data-state="ok"],
 .chat-copy[data-state="fail"] {
   opacity: 1;
   pointer-events: auto;
+}
+/* Over a code block its own button wins the corner the two would share. */
+.chat-bubble:has(.chat-code:hover) > .chat-copy:not(:focus-visible):not([data-state="ok"]):not([data-state="fail"]) {
+  opacity: 0;
+  pointer-events: none;
+}
+/* Code-block wrapper (injected around marked's <pre>): the button anchors here,
+   not on the <pre>, which scrolls horizontally and would carry it along. */
+.chat-code {
+  position: relative;
+  margin: 8px 0;
+}
+.chat-md .chat-code > pre {
+  margin: 0;
 }
 .chat-copy:hover {
   color: var(--accent);
