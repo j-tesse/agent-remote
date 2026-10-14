@@ -46,10 +46,18 @@ import { windowElapsedPct } from "./usage";
 // so the server-side render-log captures exactly what's shown here.
 
 function Markdown({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const html = useMemo(() => renderMarkdown(text), [text]);
+  // React re-sets innerHTML only when html changes, which wipes the buttons too.
+  useLayoutEffect(() => {
+    if (ref.current) addCodeCopyButtons(ref.current);
+  }, [html]);
   return (
     <div
+      ref={ref}
       className="chat-md"
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+      onClick={onCodeCopyClick}
+      dangerouslySetInnerHTML={{ __html: html }}
     />
   );
 }
@@ -291,14 +299,25 @@ async function writeClipboard(text: string): Promise<boolean> {
   return ok;
 }
 
+// Strings, not JSX: the code-block buttons are injected into marked's HTML.
+const COPY_ICON =
+  '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg>';
+const CHECK_ICON =
+  '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"/></svg>';
+
+type CopyState = "idle" | "ok" | "fail";
+const copyLabel = (state: CopyState, what: string) =>
+  state === "ok" ? "Copied" : state === "fail" ? "Copy failed" : `Copy ${what}`;
+const COPY_RESET_MS = 1200;
+
 /** Floating hover-only copy button in a bubble's corner (see copyText). */
 function CopyButton({ parts }: { parts: ChatPart[] }) {
-  const [state, setState] = useState<"idle" | "ok" | "fail">("idle");
+  const [state, setState] = useState<CopyState>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const text = copyText(parts);
   if (!text) return null;
-  const label = state === "ok" ? "Copied" : state === "fail" ? "Copy failed" : "Copy message";
+  const label = copyLabel(state, "message");
   return (
     <button
       type="button"
@@ -311,42 +330,49 @@ function CopyButton({ parts }: { parts: ChatPart[] }) {
         const ok = await writeClipboard(text);
         setState(ok ? "ok" : "fail");
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => setState("idle"), 1200);
+        timer.current = setTimeout(() => setState("idle"), COPY_RESET_MS);
       }}
-    >
-      {state === "ok" ? (
-        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-          <path
-            d="M3 8.5l3 3 7-7"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      ) : (
-        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-          <rect
-            x="5.5"
-            y="5.5"
-            width="8"
-            height="8"
-            rx="1.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-          />
-          <path
-            d="M10.5 3.5v-.5a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-          />
-        </svg>
-      )}
-    </button>
+      dangerouslySetInnerHTML={{ __html: state === "ok" ? CHECK_ICON : COPY_ICON }}
+    />
   );
+}
+
+/** Wrap each <pre> in a `.chat-code` box carrying a copy button. Imperative: the
+ * HTML is marked's (dangerouslySetInnerHTML), so React never reconciles inside it,
+ * and keeping it out of renderMarkdown keeps UI chrome out of the render log. */
+function addCodeCopyButtons(root: HTMLElement) {
+  for (const pre of Array.from(root.querySelectorAll("pre"))) {
+    if (pre.parentElement?.classList.contains("chat-code")) continue;
+    const box = document.createElement("div");
+    box.className = "chat-code";
+    pre.replaceWith(box);
+    box.appendChild(pre);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-copy";
+    setCopyState(btn, "idle");
+    box.appendChild(btn);
+  }
+}
+
+function setCopyState(btn: HTMLElement, state: CopyState) {
+  btn.dataset.state = state;
+  const label = copyLabel(state, "code");
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  btn.innerHTML = state === "ok" ? CHECK_ICON : COPY_ICON;
+}
+
+/** Delegated click for the injected code-block buttons. */
+async function onCodeCopyClick(e: React.MouseEvent<HTMLElement>) {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>(".chat-code > .chat-copy");
+  if (!btn) return;
+  e.stopPropagation();
+  // textContent of <code> = the raw snippet, without the ``` fence.
+  const pre = btn.parentElement?.querySelector("pre");
+  const ok = await writeClipboard((pre?.textContent ?? "").replace(/\n$/, ""));
+  setCopyState(btn, ok ? "ok" : "fail");
+  setTimeout(() => btn.isConnected && setCopyState(btn, "idle"), COPY_RESET_MS);
 }
 
 function Bubble({
