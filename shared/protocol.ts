@@ -37,6 +37,9 @@ export interface SessionInfo {
   /** Soft-removed: closed from the session list, but kept (state and all) for
    * the parent's inline view until the parent itself is removed. */
   hidden?: boolean;
+  /** Top-level session an agent started via the `spawn_session` host tool:
+   * provenance only (lifecycle is independent). Not focused on spawn. */
+  spawnedBy?: string;
   createdAt: number;
   /** Command line currently executing in the session, or null when idle at the
    * prompt. Kept live by shell integration; always null for harnesses without

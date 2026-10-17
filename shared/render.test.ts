@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  spawnedSessionId,
   DIFF_CONTEXT,
   copyText,
   diffFoldLabel,
@@ -618,5 +619,25 @@ describe("copyText", () => {
         { type: "image", id: "x", mediaType: "image/png", name: "a.png", url: "/api/upload/x" },
       ]),
     ).toBe("see\n\n[image: a.png]");
+  });
+});
+
+describe("spawnedSessionId", () => {
+  const tool = (output?: string): Extract<ChatPart, { type: "tool" }> => ({
+    type: "tool",
+    toolId: "t",
+    name: "mcp__agent-remote__spawn_session",
+    args: {},
+    status: "done",
+    output,
+  });
+  it("reads the id from a spawn result", () => {
+    expect(spawnedSessionId(tool('{"spawnedSession":"abc","status":"running"}'))).toBe("abc");
+  });
+  it("ignores other output", () => {
+    expect(spawnedSessionId(tool())).toBeUndefined();
+    expect(spawnedSessionId(tool("Spawn limit reached"))).toBeUndefined();
+    expect(spawnedSessionId(tool('{"sessionId":"abc"}'))).toBeUndefined();
+    expect(spawnedSessionId(tool('{"spawnedSession": broken'))).toBeUndefined();
   });
 });

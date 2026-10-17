@@ -55,6 +55,7 @@ import { attachSuggestions } from "./suggestions.js";
 import { attachModelNames } from "./modelNames.js";
 import { attachTurnRouter } from "./turnRouter.js";
 import { attachContinuity } from "./continuity.js";
+import { attachSessionTools } from "./sessionTools.js";
 import type {
   ChatImageRef,
   ClientMessage,
@@ -106,6 +107,10 @@ attachTurnRouter(manager, config.autoPr);
 // The other half of Continuity Mode: cancel an armed prompt when a human types,
 // withdraws it, or the session moves on. See server/continuity.ts.
 attachContinuity(manager);
+
+// Host tools: agents (claude) can spawn and drive other chat sessions as
+// ordinary tabs, rate-limited globally. See server/sessionTools.ts.
+attachSessionTools(manager, () => listFolders().map((f) => f.path));
 
 const harnesses: HarnessInfo[] = [...adapters.values()].map((a) => ({
   id: a.id,
