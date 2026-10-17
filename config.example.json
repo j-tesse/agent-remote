@@ -20,6 +20,14 @@
     "pi": {
       "enabled": true,
       "command": "pi"
+    },
+    "acp": {
+      "gemini": {
+        "enabled": false,
+        "name": "Gemini",
+        "command": "gemini",
+        "args": ["--experimental-acp"]
+      }
     }
   },
   "llm": {
