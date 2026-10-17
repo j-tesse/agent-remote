@@ -12,6 +12,14 @@ export interface HarnessConfig {
    * endpoint (e.g. vLLM) via ANTHROPIC_BASE_URL + ANTHROPIC_DEFAULT_*_MODEL, so
    * chat sessions can be tested end-to-end without spending Claude tokens. */
   env?: Record<string, string>;
+  /** Extra CLI args (ACP agents need a flag, e.g. `--experimental-acp`). */
+  args?: string[];
+}
+
+/** An ACP (Agent Client Protocol) agent: any CLI speaking ACP over stdio. */
+export interface AcpHarnessConfig extends HarnessConfig {
+  /** Display name (defaults to the config key). */
+  name?: string;
 }
 
 export interface LlmConfig {
@@ -49,6 +57,9 @@ export interface Config {
     claudeLocal?: HarnessConfig;
     pi: HarnessConfig;
     terminal: HarnessConfig;
+    /** ACP agents keyed by harness id, e.g. `{"gemini": {command:"gemini",
+     * args:["--experimental-acp"]}}` — one generic adapter, no code per agent. */
+    acp?: Record<string, AcpHarnessConfig>;
   };
   llm: LlmConfig;
   /** Optional overrides for the auto-PR capability (see AutoPrConfig). */
