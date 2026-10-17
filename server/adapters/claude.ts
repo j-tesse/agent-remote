@@ -4,11 +4,14 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 import {
+  createSdkMcpServer,
   forkSession,
   getSessionMessages,
   getSubagentMessages,
   listSubagents,
   query,
+  tool,
+  type McpSdkServerConfigWithInstance,
   type SessionMessage,
   type EffortLevel,
   type ModelInfo,
@@ -23,6 +26,7 @@ import {
   type UserDialogRequest,
   type UserDialogResult,
 } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import type { HarnessConfig } from "../config.js";
 import type {
   ChatAction,
@@ -40,6 +44,8 @@ import type {
   ChatSession,
   ChatSessionHandlers,
   HarnessAdapter,
+  HostToolParam,
+  HostToolSet,
   SessionOptions,
 } from "./types.js";
 import {
@@ -332,6 +338,51 @@ export function createClaudeAdapter(
   };
 }
 
+function zodParam(p: HostToolParam): z.ZodType {
+  let t: z.ZodType =
+    p.type === "number"
+      ? z.number()
+      : p.enum?.length
+        ? z.enum(p.enum as [string, ...string[]])
+        : z.string();
+  t = t.describe(p.description);
+  return p.optional ? t.optional() : t;
+}
+
+/** SDK name of a host tool (`mcp__<server>__<tool>`). */
+const hostToolName = (set: HostToolSet, name: string) => `mcp__${set.name}__${name}`;
+
+/** `query()` options exposing a HostToolSet via an in-process MCP server. */
+export function hostToolOptions(set: HostToolSet): {
+  mcpServers: Record<string, McpSdkServerConfigWithInstance>;
+} {
+  const server = createSdkMcpServer({
+    name: set.name,
+    instructions: set.instructions,
+    tools: set.tools.map((t) =>
+      tool(
+        t.name,
+        t.description,
+        Object.fromEntries(
+          Object.entries(t.params).map(([k, p]) => [k, zodParam(p)]),
+        ),
+        async (args) => {
+          try {
+            const text = await t.run(args as Record<string, unknown>);
+            return { content: [{ type: "text", text }] };
+          } catch (e) {
+            return {
+              content: [{ type: "text", text: (e as Error).message }],
+              isError: true,
+            };
+          }
+        },
+      ),
+    ),
+  });
+  return { mcpServers: { [set.name]: server } };
+}
+
 class ClaudeChatSession implements ChatSession {
   private handlers?: ChatSessionHandlers;
   private q?: Query;
@@ -452,6 +503,9 @@ class ClaudeChatSession implements ChatSession {
         // Configured env (claude-local → vLLM). The SDK REPLACES the subprocess
         // env rather than merging, so spread process.env to keep PATH/HOME/etc.
         ...(this.env ? { env: { ...process.env, ...this.env } } : {}),
+        // Backend host tools (spawn/drive other sessions) as an in-process MCP
+        // server. Rebuilt per launch: a server instance binds one transport.
+        ...(this.opts.hostTools ? hostToolOptions(this.opts.hostTools) : {}),
         includePartialMessages: true,
         // Without this the SDK forwards only a sub-agent's tool_use/tool_result
         // blocks (a heartbeat); with it the whole nested conversation arrives,
@@ -467,6 +521,13 @@ class ClaudeChatSession implements ChatSession {
         // requests instead of silently sandboxing/denying.
         canUseTool: (toolName, toolInput, { suggestions }) =>
           new Promise<PermissionResult>((resolve) => {
+            // Read-only host tools skip the card. Here, not via `allowedTools`,
+            // which the SDK warns shadows canUseTool.
+            const ht = this.opts.hostTools;
+            if (ht?.tools.some((t) => t.readOnly && hostToolName(ht, t.name) === toolName)) {
+              resolve({ behavior: "allow", updatedInput: toolInput });
+              return;
+            }
             // AskUserQuestion is a question, not a permission: render a structured
             // `questions` card and answer via updatedInput.answers (as the TUI
             // does). Routed here because the CLI doesn't reliably fire

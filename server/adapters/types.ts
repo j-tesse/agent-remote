@@ -15,6 +15,36 @@ export interface SessionOptions {
   /** Opaque harness-native handle for resuming a prior session; absent for a
    * fresh one. Adapters without resume support ignore it. */
   resume?: string;
+  /** Backend tools to offer the agent (server/sessionTools.ts), bound to this
+   * session. Adapters expose them natively (claude: in-process MCP server);
+   * ones that can't simply ignore them. */
+  hostTools?: HostToolSet;
+}
+
+/** A harness-agnostic tool the backend offers an agent. Schema is a flat map of
+ * scalar params — enough for our tools, and trivially mapped to zod/JSON schema. */
+export interface HostToolParam {
+  type: "string" | "number";
+  description: string;
+  optional?: boolean;
+  enum?: string[];
+}
+
+export interface HostTool {
+  name: string;
+  description: string;
+  params: Record<string, HostToolParam>;
+  /** No side effects → adapters may skip the permission prompt. */
+  readOnly?: boolean;
+  /** Text result for the model. Throw → reported to the model as a tool error. */
+  run(args: Record<string, unknown>): Promise<string>;
+}
+
+export interface HostToolSet {
+  /** Server name (claude: tools surface as `mcp__<name>__<tool>`). */
+  name: string;
+  instructions?: string;
+  tools: HostTool[];
 }
 
 /** Fed raw PTY output chunks: extracts structured session events (e.g. from

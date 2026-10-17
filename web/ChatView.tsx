@@ -26,6 +26,7 @@ import type {
 } from "../shared/protocol";
 import {
   agentPrompt,
+  spawnedSessionId,
   copyText,
   diffFoldLabel,
   groupParts,
@@ -108,7 +109,18 @@ function ToolBodyView({ body }: { body: ToolBody }) {
 const AgentsContext = createContext<{
   agents: Record<string, AgentRun>;
   onLoad: (toolId: string) => void;
-}>({ agents: {}, onLoad: () => {} });
+  // For a host `spawn_session` call: watch the spawned tab inline, jump to it.
+  client?: Client;
+  held: ReadonlySet<string>;
+  known: ReadonlySet<string>;
+  onOpenSession: (id: string) => void;
+}>({
+  agents: {},
+  onLoad: () => {},
+  held: new Set(),
+  known: new Set(),
+  onOpenSession: () => {},
+});
 
 /** As the element grows, scroll its scroll container so its bottom edge stays
  * where it was — but only if that edge was in view (never yank a reader who
@@ -224,10 +236,16 @@ function ToolPart({
 }) {
   const glyph = toolGlyph(part.status);
   const view = toolView(part);
-  const { agents, onLoad } = useContext(AgentsContext);
+  const { agents, onLoad, client, held, known, onOpenSession } =
+    useContext(AgentsContext);
   const run = agents[part.toolId];
   // An empty run keeps the ordinary tool view — see renderPart.
   const nested = run && (run.loading || run.state.messages.length > 0);
+  const spawned = spawnedSessionId(part);
+  const peer = usePeerChat(
+    client!,
+    client && spawned && held.has(spawned) ? spawned : undefined,
+  );
   return (
     <details
       className={`chat-tool${standalone ? " standalone" : ""}`}
@@ -252,6 +270,19 @@ function ToolPart({
             <span className="diff-del">−{view.stat.removed}</span>
           </span>
         )}
+        {spawned && known.has(spawned) && (
+          <button
+            type="button"
+            className="chat-assistant-trace-link"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onOpenSession(spawned);
+            }}
+          >
+            open session ↗
+          </button>
+        )}
       </summary>
       {/* A sub-agent's transcript replaces the args dump and the <pre> report —
           the report is already its last bubble (see the reducer's agent-done). */}
@@ -261,6 +292,8 @@ function ToolPart({
           live={part.status !== "done" && part.status !== "error"}
           prompt={agentPrompt(part)}
         />
+      ) : peer ? (
+        <AgentPanel state={peer} live={peer.busy} prompt="" empty="Starting…" />
       ) : (
         <>
           <ToolBodyView body={view.body} />
@@ -2144,8 +2177,12 @@ export function ChatView({
       agents: state.agents,
       onLoad: (toolId: string) =>
         client.chatAction(sessionId, { type: "load-agent", toolId }),
+      client,
+      held: heldSessions,
+      known: knownSessions,
+      onOpenSession,
     }),
-    [state.agents, client, sessionId],
+    [state.agents, client, sessionId, heldSessions, knownSessions, onOpenSession],
   );
 
   return (

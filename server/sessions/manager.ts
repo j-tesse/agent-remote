@@ -8,6 +8,7 @@ import type {
   ChatSession,
   ChatTranslator,
   HarnessAdapter,
+  HostToolSet,
   SessionEventParser,
   SessionOptions,
 } from "../adapters/types.js";
@@ -36,7 +37,12 @@ export interface StartOptions extends SessionOptions {
   parent?: string;
   /** Session this one supersedes (resume from a tab): closed iff it's an empty chat. */
   replaces?: string;
+  /** Session whose agent started this one (host tool); → `SessionInfo.spawnedBy`. */
+  spawnedBy?: string;
 }
+
+/** Builds the host tools for a new session (server/sessionTools.ts). */
+export type HostToolFactory = (sessionId: string) => HostToolSet | undefined;
 
 // Per-session scrollback retained for replay on (re)connect; bounded for memory.
 const MAX_BUFFER = 200_000;
@@ -95,7 +101,21 @@ export class SessionManager {
   private sessions = new Map<string, Session>();
   private listeners = new Set<SessionListener>();
 
+  private hostTools?: HostToolFactory;
+
   constructor(private adapters: Map<string, HarnessAdapter>) {}
+
+  /** Install the host-tool factory; applies to sessions started afterwards. */
+  setHostTools(factory: HostToolFactory): void {
+    this.hostTools = factory;
+  }
+
+  /** Chat harnesses (id + name), e.g. for a spawn tool's harness enum. */
+  chatHarnesses(): { id: string; name: string }[] {
+    return [...this.adapters.values()]
+      .filter((a) => a.createChatSession || a.createChatTranslator)
+      .map((a) => ({ id: a.id, name: a.name }));
+  }
 
   subscribe(listener: SessionListener): () => void {
     this.listeners.add(listener);
@@ -169,7 +189,11 @@ export class SessionManager {
       createdAt: Date.now(),
       currentCommand: null,
       ...(opts.parent ? { parentId: opts.parent } : {}),
+      ...(opts.spawnedBy ? { spawnedBy: opts.spawnedBy } : {}),
     };
+    // Bound by id, resolved lazily at call time — the session isn't registered yet.
+    const hostTools = isChat ? this.hostTools?.(info.id) : undefined;
+    if (hostTools) opts = { ...opts, hostTools };
 
     const session = adapter.createChatSession
       ? this.startChatSession(adapter, opts, info)

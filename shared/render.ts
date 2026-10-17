@@ -717,6 +717,21 @@ export function agentPrompt(part: Extract<ChatPart, { type: "tool" }>): string {
   return typeof prompt === "string" ? prompt : "";
 }
 
+/** Session a host `spawn_session` call started (its JSON result carries
+ * `spawnedSession`), so the UI can show that tab's transcript inline. */
+export function spawnedSessionId(
+  part: Extract<ChatPart, { type: "tool" }>,
+): string | undefined {
+  const out = part.output?.trim();
+  if (!out?.startsWith("{") || !out.includes('"spawnedSession"')) return undefined;
+  try {
+    const id = (JSON.parse(out) as { spawnedSession?: unknown }).spawnedSession;
+    return typeof id === "string" && id ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The sub-agent's transcript as a scrollable panel of full turns, opening with
  * the task it was given. Recursion carries the flat root map through, so an
  * agent inside an agent nests again. */

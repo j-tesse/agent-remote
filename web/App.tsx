@@ -394,7 +394,8 @@ function Workspace({
     for (const s of sessions) {
       if (!knownIds.current.has(s.id)) {
         knownIds.current.add(s.id);
-        if (!s.parentId) created = s;
+        // Agent-spawned tabs too: they'd yank focus from the session you're watching.
+        if (!s.parentId && !s.spawnedBy) created = s;
       }
     }
     if (created) {
