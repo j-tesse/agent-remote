@@ -12,6 +12,8 @@ export interface HarnessConfig {
    * endpoint (e.g. vLLM) via ANTHROPIC_BASE_URL + ANTHROPIC_DEFAULT_*_MODEL, so
    * chat sessions can be tested end-to-end without spending Claude tokens. */
   env?: Record<string, string>;
+  /** Extra CLI args appended to the harness's own (aider: e.g. `--model`). */
+  args?: string[];
 }
 
 export interface LlmConfig {
@@ -48,6 +50,8 @@ export interface Config {
      * `claude`, different id/name/env. */
     claudeLocal?: HarnessConfig;
     pi: HarnessConfig;
+    /** Aider via a Python bridge over its scripting API (adapters/aider.ts). */
+    aider?: HarnessConfig;
     terminal: HarnessConfig;
   };
   llm: LlmConfig;
