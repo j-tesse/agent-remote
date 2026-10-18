@@ -60,6 +60,12 @@ if [ "$PI_ENABLED" = "true" ]; then
   PI_COMMAND="$(ask "  Command to launch pi" "pi")"
 fi
 
+AIDER_ENABLED="$(ask_yn "Expose Aider?" "n")"
+AIDER_COMMAND="aider"
+if [ "$AIDER_ENABLED" = "true" ]; then
+  AIDER_COMMAND="$(ask "  Command to launch aider" "aider")"
+fi
+
 TERMINAL_ENABLED="$(ask_yn "Expose a plain terminal (shell)?" "y")"
 TERMINAL_COMMAND="${SHELL:-bash}"
 if [ "$TERMINAL_ENABLED" = "true" ]; then
@@ -125,6 +131,10 @@ cat > "$CONFIG_FILE" <<EOF
     "pi": {
       "enabled": $PI_ENABLED,
       "command": "$(json_escape "$PI_COMMAND")"
+    },
+    "aider": {
+      "enabled": $AIDER_ENABLED,
+      "command": "$(json_escape "$AIDER_COMMAND")"
     },
     "terminal": {
       "enabled": $TERMINAL_ENABLED,

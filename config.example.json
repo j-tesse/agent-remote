@@ -20,6 +20,11 @@
     "pi": {
       "enabled": true,
       "command": "pi"
+    },
+    "aider": {
+      "enabled": false,
+      "command": "aider",
+      "args": ["--model", "openai/my-model", "--openai-api-base", "http://localhost:8000/v1", "--openai-api-key", "dummy"]
     }
   },
   "llm": {

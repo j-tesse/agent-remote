@@ -2,6 +2,7 @@ import type { Config } from "../config.js";
 import type { HarnessAdapter } from "./types.js";
 import { createClaudeAdapter } from "./claude.js";
 import { createPiAdapter } from "./pi.js";
+import { createAiderAdapter } from "./aider.js";
 import { createShellAdapter } from "./shell.js";
 
 // Builds the set of adapters the backend will expose, based on which harnesses
@@ -24,6 +25,10 @@ export function buildAdapters(config: Config): Map<string, HarnessAdapter> {
   }
   if (config.harnesses.pi?.enabled) {
     const adapter = createPiAdapter(config.harnesses.pi);
+    adapters.set(adapter.id, adapter);
+  }
+  if (config.harnesses.aider?.enabled) {
+    const adapter = createAiderAdapter(config.harnesses.aider);
     adapters.set(adapter.id, adapter);
   }
   if (config.harnesses.terminal?.enabled) {

@@ -4,7 +4,7 @@ A harness-agnostic web remote for AI coding agents.
 
 `agent-remote` is a single webpage for managing your local AI agent sessions —
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and
-[pi](https://github.com/getpi/pi) today, and any other CLI-based harness you
+[pi](https://github.com/getpi/pi) and [Aider](https://aider.chat) today, and any other CLI-based harness you
 care to plug in tomorrow. Start, watch, steer, and switch between sessions from
 one browser tab instead of juggling terminals.
 
@@ -96,6 +96,10 @@ npm start            # serves UI + API + WebSocket on one port
 **Requirements:** Node.js, plus the agent CLIs you want to drive
 (e.g. `claude` and `pi`) installed and available on your `PATH`. All
 configuration lives in `config.json` — see `config.example.json` for the shape.
+Aider runs through a small Python bridge under aider's own interpreter (found
+via the `aider` launcher's shebang), always in the `diff-fenced`
+SEARCH/REPLACE edit format; your `~/.aider.conf.yml` still applies, and
+`harnesses.aider.args` adds CLI flags (e.g. `--model`).
 
 ## Contributing
 
