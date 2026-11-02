@@ -349,6 +349,44 @@ describe("applyChatEvent", () => {
     expect(state.assistantTraces[0].anchorMessageId).toBe("m1");
   });
 
+  it("updates a live AI-mode note in place (same slot, anchor and time)", () => {
+    const note = (summary: string, at: number, update?: boolean) => ({
+      type: "assistant-trace" as const,
+      trace: {
+        requestId: "auto-pr:checks",
+        kind: "auto-pr" as const,
+        outcome: "note" as const,
+        summary,
+        at,
+        update,
+        checks: [{ name: "build", bucket: summary === "done" ? "pass" : "pending", state: "" }],
+      },
+    });
+    let state = reduce([
+      { type: "user-message", message: { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] } },
+      note("waiting", 10, true),
+      {
+        type: "assistant-trace",
+        trace: { requestId: "other", kind: "auto-pr", outcome: "note", summary: "x", at: 11 },
+      },
+      { type: "user-message", message: { id: "u2", role: "user", parts: [{ type: "text", text: "more" }] } },
+    ]);
+    state = applyChatEvent(state, note("done", 20, true));
+    expect(state.assistantTraces.map((t) => t.summary)).toEqual(["done", "x"]);
+    const live = state.assistantTraces[0];
+    expect(live.at).toBe(10);
+    expect(live.anchorMessageId).toBe("u1");
+    expect(live.checks?.[0].bucket).toBe("pass");
+  });
+
+  it("appends a same-id trace that doesn't ask to update", () => {
+    const t = (summary: string) => ({
+      type: "assistant-trace" as const,
+      trace: { requestId: "r", kind: "select" as const, outcome: "allow" as const, summary, at: 1 },
+    });
+    expect(reduce([t("a"), t("b")]).assistantTraces).toHaveLength(2);
+  });
+
   it("caps AI-mode traces at 20 (keeps the most recent)", () => {
     const events: ChatEvent[] = Array.from({ length: 25 }, (_, i) => ({
       type: "assistant-trace",

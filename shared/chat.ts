@@ -434,6 +434,17 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
       // transcript: auto-PR pins one for a run that spans minutes, and a stale
       // id would render nowhere (or, worse, sink to the end and let every later
       // message slide in above it). Unanchored means "before any message".
+      if (event.trace.update) {
+        const i = state.assistantTraces.findIndex(
+          (t) => t.requestId === event.trace.requestId,
+        );
+        if (i >= 0) {
+          const prev = state.assistantTraces[i];
+          const traces = state.assistantTraces.slice();
+          traces[i] = { ...event.trace, at: prev.at, anchorMessageId: prev.anchorMessageId };
+          return { ...state, assistantTraces: traces };
+        }
+      }
       const pinned = event.trace.anchorMessageId;
       const known =
         pinned !== undefined &&

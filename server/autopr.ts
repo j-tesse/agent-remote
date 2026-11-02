@@ -11,12 +11,13 @@
 //   3. push    — `git push -u origin <branch>`
 //   4. PR      — drive a real `pi /pr` session (server/prAgent.ts)
 //   5. merge   — `gh pr merge --squash --delete-branch`   } only when
+//                (refused → poll checks in a live note, retry) }
 //   6. main    — checkout + fast-forward the integration branch  } `autoMerge`
 // Every step narrates itself into the origin session's transcript as an AI-mode
 // note. Everything is best-effort: a failed step reports and stops, never throws.
 // A merge that lands hands straight back to Continuity Mode, when it's on.
 import type { AutoPrConfig } from "./config.js";
-import type { RunContext } from "./turnRouter.js";
+import { firstLine, type RunContext } from "./turnRouter.js";
 import { runContinuity } from "./continuity.js";
 import {
   branchExists,
@@ -30,6 +31,9 @@ import {
   isDirty,
   isRepo,
   mainBranch,
+  checksState,
+  listChecks,
+  type PrCheck,
   openPrForBranch,
   prefixedBranch,
   sanitizeBranchName,
@@ -43,6 +47,17 @@ import { runPrSession } from "./prAgent.js";
 
 /** How many commit-message attempts before falling back to a generic subject. */
 const COMMIT_ATTEMPTS = 3;
+/** Longest we'll sit on a PR's checks before giving up on the merge. */
+const CHECKS_TIMEOUT_MS = 45 * 60_000;
+/** How often the checks are re-read while waiting. */
+const CHECKS_POLL_MS = 15_000;
+/** Empty polls tolerated before concluding there are no checks (~1 min). */
+const NO_CHECKS_RETRIES = 4;
+/** GitHub recomputes mergeability a beat after checks go green. */
+const MERGE_RETRIES = 3;
+const MERGE_RETRY_DELAY_MS = 10_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** What the repo state implies for this run. Pure, so the branching is testable:
  * - `nothing`  — clean tree and no divergence from the base: just go back to main
@@ -183,11 +198,7 @@ export async function runAutoPr(
     note("error", "Cannot merge", "no PR reference was reported");
     return;
   }
-  const merge = await gh(folder, ["pr", "merge", target, "--squash", "--delete-branch"]);
-  if (!merge.ok) {
-    failed(`Merging ${label} failed`, merge);
-    return;
-  }
+  if (!(await mergeWhenReady(ctx, target, label))) return;
   note("note", `Merged ${label}`, "squashed, branch deleted");
 
   // --- 6. back to main -----------------------------------------------------
@@ -198,6 +209,67 @@ export async function runAutoPr(
   // (a no-op when it's off). Still inside the router's single-flight, with the
   // anchor pinned, so it can't race a settle of its own.
   await runContinuity(ctx, { afterPr: true });
+}
+
+/** Merge the PR. Assumes no checks gate it; if the merge is refused, poll its
+ * checks — narrated as ONE live note whose rows update in place — and retry
+ * once they're green. */
+async function mergeWhenReady(ctx: RunContext, target: string, label: string): Promise<boolean> {
+  const { folder, note, failed } = ctx;
+  const merge = () => gh(folder, ["pr", "merge", target, "--squash", "--delete-branch"]);
+  let result = await merge();
+  if (result.ok) return true;
+
+  const id = `auto-pr:checks:${target}:${Date.now()}`;
+  const live: typeof note = (outcome, summary, reason, extra) =>
+    note(outcome, summary, reason, { ...extra, id, update: true });
+  const tally = (checks: PrCheck[]) =>
+    `${checks.filter((c) => c.bucket !== "pending").length} of ${checks.length} done`;
+  live("note", `Waiting for checks on ${label}`, "the merge was refused; retrying once they pass");
+
+  const deadline = Date.now() + CHECKS_TIMEOUT_MS;
+  let checks: PrCheck[] = [];
+  let empties = 0;
+  let shown = "";
+  for (;;) {
+    checks = await listChecks(folder, target);
+    const state = checksState(checks);
+    if (state === "none") {
+      // A fresh commit's checks may not be registered yet.
+      if (++empties > NO_CHECKS_RETRIES) {
+        const stderr = result.stderr.trim();
+        live("error", `Merging ${label} failed`, firstLine(stderr), { detail: stderr || undefined });
+        return false;
+      }
+    } else if (state === "failed") {
+      live("error", `Checks failed on ${label}`, tally(checks), { checks });
+      return false;
+    } else if (state === "passed") {
+      live("note", `Checks passed on ${label}`, undefined, { checks });
+      break;
+    } else {
+      // Only re-post on a change: every update is a broadcast to each client.
+      const sig = checks.map((c) => `${c.name}=${c.bucket}`).join("|");
+      if (sig !== shown) {
+        shown = sig;
+        live("note", `Waiting for checks on ${label}`, tally(checks), { checks });
+      }
+    }
+    if (Date.now() >= deadline) {
+      live("error", `Gave up waiting for checks on ${label}`,
+        `still running after ${CHECKS_TIMEOUT_MS / 60_000} min`, { checks });
+      return false;
+    }
+    await sleep(CHECKS_POLL_MS);
+  }
+
+  for (let i = 0; i < MERGE_RETRIES; i++) {
+    result = await merge();
+    if (result.ok) return true;
+    await sleep(MERGE_RETRY_DELAY_MS);
+  }
+  failed(`Merging ${label} failed`, result);
+  return false;
 }
 
 /** Cut `<prefix>/<slug>` off the current commit, naming it via the LLM with a
