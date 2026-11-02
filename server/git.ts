@@ -111,6 +111,50 @@ export function parseOpenPr(stdout: string): OpenPr | null {
   }
 }
 
+/** One check on a PR, as `gh pr checks --json` reports it. */
+export interface PrCheck {
+  name: string;
+  /** gh's coarse category: pass | fail | pending | skipping | cancel. */
+  bucket: string;
+  state: string;
+  link?: string;
+}
+
+/** Read `gh pr checks --json name,workflow,bucket,state,link`. Junk → []. Pure. */
+export function parseChecks(stdout: string): PrCheck[] {
+  try {
+    const rows: unknown = JSON.parse(stdout);
+    if (!Array.isArray(rows)) return [];
+    return rows.flatMap((r: Record<string, unknown>) => {
+      if (!r || typeof r.name !== "string" || !r.name) return [];
+      const wf = typeof r.workflow === "string" && r.workflow ? r.workflow : null;
+      return [{
+        name: wf && wf !== r.name ? `${wf} / ${r.name}` : r.name,
+        bucket: typeof r.bucket === "string" ? r.bucket : "",
+        state: typeof r.state === "string" ? r.state : "",
+        ...(typeof r.link === "string" && r.link ? { link: r.link } : {}),
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Where a set of checks stands. `none` = nothing reported (yet). Pure. */
+export function checksState(checks: PrCheck[]): "none" | "pending" | "failed" | "passed" {
+  if (!checks.length) return "none";
+  if (checks.some((c) => c.bucket === "fail" || c.bucket === "cancel")) return "failed";
+  if (checks.some((c) => c.bucket === "pending")) return "pending";
+  return "passed";
+}
+
+/** The PR's checks with their individual status. Best-effort: [] on any error.
+ * gh exits non-zero while checks fail/pend, but still prints the JSON. */
+export async function listChecks(cwd: string, pr: string): Promise<PrCheck[]> {
+  const r = await gh(cwd, ["pr", "checks", pr, "--json", "name,workflow,bucket,state,link"], 60_000);
+  return parseChecks(r.stdout);
+}
+
 export async function isRepo(cwd: string): Promise<boolean> {
   const r = await git(cwd, ["rev-parse", "--is-inside-work-tree"]);
   return r.ok && r.stdout.trim() === "true";

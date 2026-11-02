@@ -2855,6 +2855,49 @@ button.auto-press::after {
   padding-left: 6px;
   opacity: 0.6;
 }
+/* PR checks on a live auto-PR note: one row each, glyph coloured by outcome. */
+.chat-assistant-trace-checks {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0 0 0 21px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.chat-assistant-trace-checks li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-assistant-trace-checks li > :nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-check-mark {
+  flex: none;
+  width: 1em;
+  text-align: center;
+}
+.chat-check-state {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  opacity: 0.7;
+}
+.chat-assistant-trace-checks [data-bucket="pass"] .chat-check-mark {
+  color: var(--success);
+}
+.chat-assistant-trace-checks [data-bucket="fail"] .chat-check-mark,
+.chat-assistant-trace-checks [data-bucket="cancel"] .chat-check-mark {
+  color: var(--danger);
+}
+.chat-assistant-trace-checks [data-bucket="pending"] .chat-check-mark {
+  color: var(--warning);
+  animation: status-pulse 1.4s ease-in-out infinite;
+}
 .chat-assistant-trace-details {
   margin-top: 2px;
 }

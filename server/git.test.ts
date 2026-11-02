@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   derivePrefix,
+  checksState,
+  parseChecks,
   fallbackSlug,
   parseOpenPr,
   prefixedBranch,
@@ -142,5 +144,31 @@ describe("fallbackSlug", () => {
     const slug = fallbackSlug(new Date(2026, 7, 24, 14, 32));
     expect(slug).toBe("auto-pr-20260824-1432");
     expect(sanitizeBranchName(slug)).toBe(slug);
+  });
+});
+
+describe("parseChecks / checksState", () => {
+  const json = JSON.stringify([
+    { name: "build", workflow: "CI", bucket: "pass", state: "SUCCESS", link: "https://x/1" },
+    { name: "lint", workflow: "", bucket: "skipping", state: "SKIPPED", link: "" },
+    { name: "deploy", workflow: "deploy", bucket: "pending", state: "IN_PROGRESS" },
+    { workflow: "nameless" },
+  ]);
+  const checks = parseChecks(json);
+  it("parses rows, prefixing the workflow unless it repeats the name", () => {
+    expect(checks.map((c) => c.name)).toEqual(["CI / build", "lint", "deploy"]);
+    expect(checks[0].link).toBe("https://x/1");
+    expect(checks[1].link).toBeUndefined();
+  });
+  it("yields [] for junk", () => {
+    expect(parseChecks("no checks reported")).toEqual([]);
+    expect(parseChecks("{}")).toEqual([]);
+  });
+  it("classifies the set", () => {
+    expect(checksState([])).toBe("none");
+    expect(checksState(checks)).toBe("pending");
+    expect(checksState(checks.slice(0, 2))).toBe("passed");
+    expect(checksState([...checks, { name: "x", bucket: "fail", state: "FAILURE" }])).toBe("failed");
+    expect(checksState([{ name: "x", bucket: "cancel", state: "CANCELLED" }])).toBe("failed");
   });
 });

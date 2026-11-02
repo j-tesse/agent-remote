@@ -721,6 +721,16 @@ export interface AutoPrompt {
  * summary of the resulting decision. Surfaced in the transcript as a
  * collapsible AI-mode bubble so the user can see what AI-mode did and why.
  * Transient/diagnostic — capped in ChatState, not persisted across restarts. */
+/** One CI check on a PR (from `gh pr checks`). */
+export interface TraceCheck {
+  name: string;
+  /** pass | fail | pending | skipping | cancel. */
+  bucket: string;
+  /** Raw state, e.g. SUCCESS / IN_PROGRESS. */
+  state: string;
+  link?: string;
+}
+
 export interface AssistantTrace {
   /** Id of the card this deliberation was about, or a synthetic id
    * (`auto-pr:<at>`) for AI-mode notes that aren't about a card. */
@@ -755,6 +765,11 @@ export interface AssistantTrace {
    * anyways" override (a `run-auto-pr` action). Set server-side, never inferred
    * from kind+outcome — a continuity-only decline carries `kind:"auto-pr"` too. */
   offerAutoPr?: boolean;
+  /** Replace the trace with the same `requestId` in place (keeping its slot,
+   * `at` and anchor) instead of appending — a live note, e.g. PR checks. */
+  update?: boolean;
+  /** PR checks a note tracks, rendered as always-visible rows. */
+  checks?: TraceCheck[];
   /** Id of the assistant message this deliberation belongs to (the turn whose
    * tool call the card was about), so the UI can render it inline right after
    * that turn instead of pinned at the bottom. Assigned by the reducer when the

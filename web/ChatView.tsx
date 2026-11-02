@@ -611,6 +611,15 @@ const TRACE_VERDICT: Record<AssistantTrace["outcome"], string> = {
   note: "Note",
 };
 
+// gh's check buckets → a glyph per row.
+const CHECK_MARK: Record<string, string> = {
+  pass: "✓",
+  fail: "✗",
+  pending: "●",
+  skipping: "–",
+  cancel: "⊘",
+};
+
 // AI-mode bubble: a deliberation (what prompt the backend assistant sent the LLM
 // about a card, and the model's thoughts/reply) or a plain note from a backend
 // capability. Collapsed, it's a single line; tapping toggles the details.
@@ -738,6 +747,29 @@ function AssistantTraceBubble({
           </span>
         )}
       </div>
+      {/* Always visible, not behind the toggle: a live note updates these rows
+          in place as each check finishes. */}
+      {trace.checks && trace.checks.length > 0 && (
+        <ul className="chat-assistant-trace-checks">
+          {trace.checks.map((c) => (
+            <li key={c.name} data-bucket={c.bucket}>
+              <span className="chat-check-mark" aria-hidden="true">
+                {CHECK_MARK[c.bucket] ?? "?"}
+              </span>
+              {c.link ? (
+                <a href={c.link} target="_blank" rel="noreferrer">
+                  {c.name}
+                </a>
+              ) : (
+                <span>{c.name}</span>
+              )}
+              <span className="chat-check-state">
+                {(c.state || c.bucket).toLowerCase().replace(/_/g, " ")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       {open && (
         <div className="chat-assistant-trace-details">
           {/* The spawned session's own conversation, read straight off the

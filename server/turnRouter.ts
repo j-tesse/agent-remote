@@ -14,7 +14,7 @@
 // Like assistant.ts it runs in the backend (driven from index.ts), so the loop
 // continues with no browser open.
 import type { SessionManager } from "./sessions/manager.js";
-import type { AssistantTrace, ChatState } from "../shared/protocol.js";
+import type { AssistantTrace, ChatState, TraceCheck } from "../shared/protocol.js";
 import type { AutoPrConfig } from "./config.js";
 import type { LlmTrace } from "./llm.js";
 import { llmStatus, routeTurn } from "./llm.js";
@@ -80,6 +80,9 @@ export function shouldRouteTurn(state: ChatState): boolean {
 }
 
 /** One AI-mode note in the origin session's transcript. */
+// Same-ms notes must not share an id, or an `update` could hit the wrong one.
+let noteSeq = 0;
+
 export type Note = (
   outcome: AssistantTrace["outcome"],
   summary: string,
@@ -92,6 +95,10 @@ export type Note = (
     session?: string;
     /** Offer a "Run anyways" auto-PR override on the bubble. */
     offerAutoPr?: boolean;
+    /** Fixed id + `update`: later notes with this id rewrite it in place. */
+    id?: string;
+    update?: boolean;
+    checks?: TraceCheck[];
   },
 ) => void;
 
@@ -144,7 +151,7 @@ export function attachTurnRouter(
   ): RunContext => {
     const note: Note = (outcome, summary, reason, extra) => {
       manager.postAssistantTrace(sessionId, {
-        requestId: `${kind}:${Date.now()}`,
+        requestId: extra?.id ?? `${kind}:${Date.now()}:${++noteSeq}`,
         kind,
         outcome,
         reason,
@@ -152,6 +159,8 @@ export function attachTurnRouter(
         detail: extra?.detail,
         sessionId: extra?.session,
         offerAutoPr: extra?.offerAutoPr,
+        update: extra?.update,
+        checks: extra?.checks,
         at: Date.now(),
         anchorMessageId: anchors.get(sessionId),
         ...extra?.trace,
