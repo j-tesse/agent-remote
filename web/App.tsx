@@ -36,6 +36,11 @@ const FileEditor = lazy(() =>
 const ChatView = lazy(() =>
   import("./ChatView").then((m) => ({ default: m.ChatView })),
 );
+// Co-create split + its picker; lazy like ChatView (pulls in marked).
+const CoCreateView = lazy(() => import("./CoCreateView"));
+const ContentPicker = lazy(() =>
+  import("./ContentPicker").then((m) => ({ default: m.ContentPicker })),
+);
 // Dev colour-scheme tool; lazy so it costs nothing unless #theme is in the URL.
 const ThemeEditor = lazy(() => import("./ThemeEditor"));
 // Host telemetry page; lazy since it's a side trip, and unmounting it is what
@@ -132,6 +137,9 @@ const SELECT_ICON =
   "M3 5h2V3c-1.1 0-2 .9-2 2zm0 8h2v-2H3v2zm4 8h2v-2H7v2zM3 9h2V7H3v2zm10-6h-2v2h2V3zm6 0v2h2c0-1.1-.9-2-2-2zM5 21v-2H3c0 1.1.9 2 2 2zm-2-4h2v-2H3v2zM9 3H7v2h2V3zm2 18h2v-2h-2v2zm8-8h2v-2h-2v2zm0 8c1.1 0 2-.9 2-2h-2v2zm0-12h2V7h-2v2zm0 8h2v-2h-2v2zm-4 4h2v-2h-2v2zm0-16h2V3h-2v2z";
 const EDIT_ICON =
   "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z";
+// Material `vertical_split` — co-create (chat beside a content preview).
+const COCREATE_ICON =
+  "M3 15h8v-2H3v2zm0 4h8v-2H3v2zm0-8h8V9H3v2zm0-6v2h8V5H3zm10 0h8v14h-8V5z";
 // Terminal prompt chevron + underline bar.
 const TERMINAL_ICON = "M6.4 16L5 14.6l3.6-3.6L5 7.4 6.4 6l5 5-5 5zM13 16v-2h6v2h-6z";
 // Sparkles — stands in for an AI coding agent.
@@ -237,6 +245,7 @@ function sessionMeta(s: SessionInfo, home: string): string {
   if (s.status === "exited")
     return s.stopped ? "closed" : `exited (${s.exitCode ?? "?"})`;
   if (s.currentCommand) return s.currentCommand;
+  if (s.content) return s.content.path;
   return s.cwd === s.folder ? "running" : displayPath(s.cwd, home);
 }
 
@@ -265,6 +274,7 @@ function Workspace({
   const themeEditorOpen = useThemeEditorOpen();
   const client = useMemo(() => new Client(), []);
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
+  const coCreateHarnesses = useMemo(() => harnesses.filter((h) => h.coCreate), [harnesses]);
   // Listed sessions only; hidden (soft-removed nested) ones are in `heldIds`.
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   // Every session the client still holds, incl. hidden — for inline views.
@@ -303,6 +313,7 @@ function Workspace({
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [contentPickerOpen, setContentPickerOpen] = useState(false);
   // Narrow viewport: collapse the inline new-session buttons into the [+] menu.
   const [isNarrow, setIsNarrow] = useState(
     () => window.matchMedia("(max-width: 640px)").matches
@@ -816,7 +827,8 @@ function Workspace({
       resumeDialogOpen ||
       assistantDialogOpen ||
       selectorOpen ||
-      folderPickerOpen
+      folderPickerOpen ||
+      contentPickerOpen
     )
       return;
     const onKey = (e: KeyboardEvent) => {
@@ -835,6 +847,7 @@ function Workspace({
     assistantDialogOpen,
     selectorOpen,
     folderPickerOpen,
+    contentPickerOpen,
   ]);
 
   return (
@@ -1011,6 +1024,16 @@ function Workspace({
                     >
                       <Icon path={EDIT_ICON} />
                     </button>
+                    {coCreateHarnesses.length > 0 && (
+                      <button
+                        className="header-icon-button"
+                        onClick={() => setContentPickerOpen(true)}
+                        title="New co-create session"
+                        aria-label="New co-create session"
+                      >
+                        <Icon path={COCREATE_ICON} />
+                      </button>
+                    )}
                     {harnesses
                       .filter((h) => h.id === QUICK_HARNESS_ID)
                       .map((h) => (
@@ -1065,6 +1088,18 @@ function Workspace({
                             <Icon path={EDIT_ICON} />
                             Files
                           </button>
+                          {coCreateHarnesses.length > 0 && (
+                            <button
+                              className="add-session-option"
+                              onClick={() => {
+                                setContentPickerOpen(true);
+                                setAddMenuOpen(false);
+                              }}
+                            >
+                              <Icon path={COCREATE_ICON} />
+                              Co-create
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1116,8 +1151,15 @@ function Workspace({
                           s.currentCommand ? "busy" : ""
                         }`}
                       />
-                      <span className="session-name" title={s.harnessName}>
-                        <HarnessGlyph id={s.harnessId} name={s.harnessName} />
+                      <span
+                        className="session-name"
+                        title={s.content ? `${s.harnessName} · co-create` : s.harnessName}
+                      >
+                        {s.content ? (
+                          <Icon path={COCREATE_ICON} />
+                        ) : (
+                          <HarnessGlyph id={s.harnessId} name={s.harnessName} />
+                        )}
                       </span>
                       <span
                         className="session-meta"
@@ -1233,23 +1275,39 @@ function Workspace({
                 <Suspense fallback={<div className="empty-state">Loading chat…</div>}>
                   {sessions
                     .filter((s) => s.ui === "chat")
-                    .map((s) => (
-                      <ChatView
-                        key={s.id}
-                        client={client}
-                        sessionId={s.id}
-                        active={s.id === activeSessionId}
-                        exited={s.status === "exited"}
-                        canResume={
-                          resumable.some((r) => r.harnessId === s.harnessId)
-                        }
-                        onResume={() => setResumeDialogOpen(true)}
-                        keyboardOpen={keyboard.open}
-                        knownSessions={sessionIds}
-                        heldSessions={heldIds}
-                        onOpenSession={openSession}
-                      />
-                    ))}
+                    .map((s) => {
+                      const chat = (active: boolean) => (
+                        <ChatView
+                          key={s.id}
+                          client={client}
+                          sessionId={s.id}
+                          active={active}
+                          exited={s.status === "exited"}
+                          canResume={
+                            resumable.some((r) => r.harnessId === s.harnessId)
+                          }
+                          onResume={() => setResumeDialogOpen(true)}
+                          keyboardOpen={keyboard.open}
+                          knownSessions={sessionIds}
+                          heldSessions={heldIds}
+                          onOpenSession={openSession}
+                        />
+                      );
+                      const content = s.content;
+                      return content ? (
+                        <CoCreateView
+                          key={s.id}
+                          client={client}
+                          session={{ ...s, content }}
+                          active={s.id === activeSessionId}
+                          narrow={isNarrow}
+                          keyboardOpen={keyboard.open}
+                          renderChat={chat}
+                        />
+                      ) : (
+                        chat(s.id === activeSessionId)
+                      );
+                    })}
                 </Suspense>
               )}
               {/* Editor tabs stay mounted so unsaved edits survive tab switches. */}
@@ -1343,6 +1401,20 @@ function Workspace({
               />
             )}
 
+            {contentPickerOpen && activeFolder !== null && (
+              <Suspense fallback={null}>
+                <ContentPicker
+                  folder={activeFolder}
+                  harnesses={coCreateHarnesses}
+                  onStart={(harnessId, content) => {
+                    client.start(harnessId, activeFolder, { content });
+                    setContentPickerOpen(false);
+                  }}
+                  onClose={() => setContentPickerOpen(false)}
+                />
+              </Suspense>
+            )}
+
             {resumeDialogOpen && activeFolder !== null && (
               <div
                 className="resume-overlay"
@@ -1374,13 +1446,13 @@ function Workspace({
                             className="resume-item-open"
                             title={`Resume ${r.harnessName} session`}
                             onClick={() => {
-                              client.start(
-                                r.harnessId,
-                                activeFolder,
-                                r.resumeKey,
+                              client.start(r.harnessId, activeFolder, {
+                                resume: r.resumeKey,
                                 // Server closes it only if still empty.
-                                activeSessionId ?? undefined,
-                              );
+                                replaces: activeSessionId ?? undefined,
+                                // Resuming a co-create session restores its pane.
+                                content: r.content,
+                              });
                               setResumeDialogOpen(false);
                             }}
                           >

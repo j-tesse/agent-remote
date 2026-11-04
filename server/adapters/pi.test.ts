@@ -499,3 +499,17 @@ describe("pi model sections", () => {
       expect(piModels(catalog, patterns).every((m) => !m.section)).toBe(true);
   });
 });
+
+describe("invocation", () => {
+  const adapter = createPiAdapter({ enabled: true, command: "pi" });
+  it("appends co-create framing to the system prompt", () => {
+    expect(adapter.appendsSystemPrompt).toBe(true);
+    expect(adapter.invocation({ cwd: "", appendSystemPrompt: "edit doc.md" }).args).toEqual([
+      "--mode",
+      "rpc",
+      "--append-system-prompt",
+      "edit doc.md",
+    ]);
+    expect(adapter.invocation({ cwd: "" }).args).toEqual(["--mode", "rpc"]);
+  });
+});

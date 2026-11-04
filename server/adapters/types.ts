@@ -19,6 +19,9 @@ export interface SessionOptions {
    * session. Adapters expose them natively (claude: in-process MCP server);
    * ones that can't simply ignore them. */
   hostTools?: HostToolSet;
+  /** Text to append to the agent's system prompt (co-create framing). Only
+   * honoured by adapters declaring `appendsSystemPrompt`. */
+  appendSystemPrompt?: string;
 }
 
 /** A harness-agnostic tool the backend offers an agent. Schema is a flat map of
@@ -128,6 +131,8 @@ export interface HarnessAdapter {
   /** Optional: this harness's model labels are raw ids, so the harness-agnostic
    * namer (server/modelNames.ts) generates readable display names via the LLM. */
   readonly llmModelNames?: boolean;
+  /** Optional: honours `SessionOptions.appendSystemPrompt` (→ can co-create). */
+  readonly appendsSystemPrompt?: boolean;
   /** Build the CLI invocation for a new session. */
   invocation(opts: SessionOptions): HarnessInvocation;
   /** Optional: create a parser that extracts session events from this harness's

@@ -34,8 +34,10 @@ export function createPiAdapter(cfg: HarnessConfig): HarnessAdapter {
     resumable: true,
     // Catalog labels are raw served ids (`RedHatAI/gemma-4-31B-it-NVFP4`).
     llmModelNames: true,
+    appendsSystemPrompt: true,
     invocation(opts: SessionOptions): { command: string; args: string[] } {
       const args = ["--mode", "rpc"];
+      if (opts.appendSystemPrompt) args.push("--append-system-prompt", opts.appendSystemPrompt);
       // `--session-id` creates the session if missing and reloads it (restoring
       // context) when it already exists — same flag for fresh and resumed runs.
       if (opts.resume) args.push("--session-id", opts.resume);

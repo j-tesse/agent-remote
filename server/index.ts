@@ -33,8 +33,11 @@ import {
   saveBinaryFile,
   statEntry,
   parseRange,
+  ensureTextFile,
 } from "./files.js";
 import { mediaTypeFor } from "../shared/media.js";
+import { validatePointer } from "../shared/content.js";
+import { attachContentWatch } from "./content.js";
 import { browseDirs } from "./browse.js";
 import {
   saveUpload,
@@ -115,6 +118,7 @@ attachSessionTools(manager, () => listFolders().map((f) => f.path));
 const harnesses: HarnessInfo[] = [...adapters.values()].map((a) => ({
   id: a.id,
   name: a.name,
+  ...(a.appendsSystemPrompt ? { coCreate: true } : {}),
 }));
 
 // Server-global subscriber recording every command run (with cwd) for the
@@ -144,6 +148,7 @@ manager.subscribe({
       harnessId: info.harnessId,
       harnessName: info.harnessName,
       folder,
+      content: info.content,
     });
   },
   onChatEvent(sessionId, event) {
@@ -247,6 +252,17 @@ function routeAfterAuth(req: IncomingMessage, res: ServerResponse): void {
       },
     );
     return;
+  }
+  // Co-create turn-start snapshots: list (no text), or one by index.
+  if (url.startsWith("/api/content/snapshots?") && req.method === "GET") {
+    if (!authedUser(req, config)) return sendUnauthorized(res);
+    const params = new URL(url, "http://x").searchParams;
+    const snaps = contentWatch.snapshots(params.get("session") ?? "");
+    const i = params.get("i");
+    if (i === null) return sendJson(res, snaps.map(({ at, version }) => ({ at, version })));
+    const snap = snaps[Number(i)];
+    if (!snap) return sendJsonError(res, 404, "No such snapshot.");
+    return sendJson(res, snap);
   }
   // Resumable chat sessions for a folder (GET) / forget one (DELETE).
   if (url.startsWith("/api/resumable")) {
@@ -621,6 +637,12 @@ function broadcastFolders(): void {
   for (const ws of connections) ws.send(raw);
 }
 
+// Co-create: watch each session's content file; clients refetch on notify.
+const contentWatch = attachContentWatch(manager, (sessionId, version) => {
+  const raw = JSON.stringify({ type: "content", sessionId, version } satisfies ServerMessage);
+  for (const ws of connections) ws.send(raw);
+});
+
 // Every input bumps its folder's timestamp (folders sort by last_used_at DESC),
 // but the broadcast only matters when the *order* changes. lastActiveFolder
 // suppresses the redundant re-broadcast per keystroke in the same folder.
@@ -689,15 +711,26 @@ wss.on("connection", (ws: WebSocket, user: string) => {
       switch (msg.type) {
         case "start": {
           const cwd = normalizeFolder(msg.cwd || process.cwd());
-          manager.start(msg.harnessId, {
-            cwd,
-            resume: msg.resume,
-            replaces: typeof msg.replaces === "string" ? msg.replaces : undefined,
-          });
-          // Launching registers/bumps its folder for everyone.
-          lastActiveFolder = cwd;
-          upsertFolder(cwd);
-          broadcastFolders();
+          const content = msg.content ? validatePointer(msg.content) : undefined;
+          if (content === null) throw new Error("Invalid co-create file.");
+          const launch = () => {
+            manager.start(msg.harnessId, {
+              cwd,
+              resume: msg.resume,
+              replaces: typeof msg.replaces === "string" ? msg.replaces : undefined,
+              content,
+            });
+            // Launching registers/bumps its folder for everyone.
+            lastActiveFolder = cwd;
+            upsertFolder(cwd);
+            broadcastFolders();
+          };
+          if (!content) launch();
+          // Co-create: create the file first (the picker's Create flow).
+          else
+            void ensureTextFile(cwd, content.path).then(launch).catch((err: unknown) =>
+              send({ type: "error", message: (err as Error).message }),
+            );
           break;
         }
         case "input": {

@@ -7,6 +7,7 @@ import type {
   ViewState,
 } from "../shared/protocol.js";
 import { expandHome, normalizeFolder } from "./paths.js";
+import { validatePointer, type ContentPointer } from "../shared/content.js";
 
 // The project's only persistence layer: folders, user accounts, login sessions,
 // command log, and resumable chat sessions all survive restarts here (live PTYs
@@ -68,6 +69,13 @@ db.exec(
 db.exec(
   "CREATE INDEX IF NOT EXISTS chat_sessions_folder ON chat_sessions(folder)",
 );
+// Co-create pointer (JSON), added after the table shipped — so migrate in place.
+if (
+  !(db.prepare("PRAGMA table_info(chat_sessions)").all() as { name: string }[]).some(
+    (c) => c.name === "content",
+  )
+)
+  db.exec("ALTER TABLE chat_sessions ADD COLUMN content TEXT");
 // Chat render log (diagnostics): one row per rendered message, both the original
 // ChatMessage and its rendered form (HTML + component/class per part). Keyed by
 // (session, message), upserted so late tool results refresh the row.
@@ -243,12 +251,13 @@ export function frequentCommands(cwd: string, limit: number): string[] {
 const CHAT_SESSION_RETENTION = 2_000;
 
 const upsertChatSessionStmt = db.prepare(
-  `INSERT INTO chat_sessions (resume_key, harness_id, harness_name, folder, title, created_at, updated_at)
-   VALUES (@resumeKey, @harnessId, @harnessName, @folder, NULL, @ts, @ts)
+  `INSERT INTO chat_sessions (resume_key, harness_id, harness_name, folder, title, content, created_at, updated_at)
+   VALUES (@resumeKey, @harnessId, @harnessName, @folder, NULL, @content, @ts, @ts)
    ON CONFLICT(resume_key) DO UPDATE SET
      harness_id = excluded.harness_id,
      harness_name = excluded.harness_name,
      folder = excluded.folder,
+     content = excluded.content,
      updated_at = excluded.updated_at`,
 );
 // Only set the title while still empty, so the first user prompt sticks as the label.
@@ -259,7 +268,7 @@ const setChatSessionTitleStmt = db.prepare(
 const listResumableSessionsStmt = db.prepare(
   `SELECT resume_key AS resumeKey, harness_id AS harnessId,
           harness_name AS harnessName, COALESCE(title, '') AS title,
-          updated_at AS updatedAt
+          updated_at AS updatedAt, content
    FROM chat_sessions WHERE folder = ? ORDER BY updated_at DESC`,
 );
 const deleteChatSessionStmt = db.prepare(
@@ -279,9 +288,14 @@ export function upsertChatSession(row: {
   harnessId: string;
   harnessName: string;
   folder: string;
+  content?: ContentPointer;
   ts?: number;
 }): void {
-  upsertChatSessionStmt.run({ ...row, ts: row.ts ?? Date.now() });
+  upsertChatSessionStmt.run({
+    ...row,
+    content: row.content ? JSON.stringify(row.content) : null,
+    ts: row.ts ?? Date.now(),
+  });
   if (Math.random() < 0.02) pruneChatSessionsStmt.run(CHAT_SESSION_RETENTION);
 }
 
@@ -292,7 +306,17 @@ export function setChatSessionTitle(resumeKey: string, title: string): void {
 
 /** Resumable sessions for a folder, newest first. */
 export function listResumableSessions(folder: string): ResumableSession[] {
-  return listResumableSessionsStmt.all(folder) as ResumableSession[];
+  return (
+    listResumableSessionsStmt.all(folder) as (Omit<ResumableSession, "content"> & {
+      content: string | null;
+    })[]
+  ).map(({ content, ...r }) => {
+    let pointer = null;
+    try {
+      pointer = content ? validatePointer(JSON.parse(content)) : null;
+    } catch {}
+    return pointer ? { ...r, content: pointer } : r;
+  });
 }
 
 export function deleteChatSession(resumeKey: string): void {

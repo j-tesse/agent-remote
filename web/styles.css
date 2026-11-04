@@ -3957,3 +3957,226 @@ button.auto-press::after {
   font-size: 12px;
   margin: 4px 0;
 }
+
+/* --- Co-create (chat | content preview) ---------------------------------- */
+
+/* Fills .session-content like .chat-view; each pane hosts an absolute child. */
+.cocreate {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  background: var(--bg);
+}
+.cocreate-panes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 4px;
+}
+.cocreate-pane {
+  position: relative;
+  flex: 1 1 50%;
+  min-width: 0;
+}
+.cocreate-preview {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+.cocreate-preview-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--raised);
+  font-size: 12px;
+}
+.cocreate-preview-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.cocreate-badge {
+  display: flex;
+  gap: 6px;
+  font-family: ui-monospace, monospace;
+}
+.cocreate-badge .diff-add {
+  color: var(--success);
+}
+.cocreate-badge .diff-del {
+  color: var(--danger);
+}
+.cocreate-modes {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--text) 6%, var(--raised));
+}
+.cocreate-mode {
+  padding: 3px 10px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cocreate-mode:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--raised));
+}
+.cocreate-mode.active {
+  background: color-mix(in srgb, var(--accent) 20%, var(--raised));
+  color: var(--text);
+}
+.cocreate-mode:focus-visible,
+.cocreate-base-select:focus-visible,
+.cocreate-slider-track:focus-visible,
+.cocreate-harness:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.cocreate-base {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.cocreate-base-select {
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 12px;
+}
+.cocreate-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px 24px;
+}
+/* A document, not a chat bubble: roomier type and a readable measure. */
+.chat-md.cocreate-doc {
+  max-width: 760px;
+  margin: 0 auto;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.chat-md.cocreate-doc h1 {
+  font-size: 26px;
+}
+.chat-md.cocreate-doc h2 {
+  font-size: 20px;
+}
+.chat-md.cocreate-doc h3 {
+  font-size: 17px;
+}
+.chat-md.cocreate-doc h1,
+.chat-md.cocreate-doc h2,
+.chat-md.cocreate-doc h3 {
+  margin: 1.1em 0 0.4em;
+}
+.chat-md.cocreate-doc img {
+  max-width: 100%;
+}
+.cocreate-diff .chat-tool-diff {
+  margin: 0;
+  max-height: none;
+  border-radius: var(--r-md);
+  background: var(--raised);
+}
+
+/* Picker extras: agent chips + media type, above the path field. */
+.cocreate-picker-opts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+.cocreate-harnesses {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cocreate-harness {
+  padding: 5px 12px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cocreate-harness:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--raised));
+}
+.cocreate-harness.active {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.cocreate-type {
+  padding: 5px 8px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* Mobile pane switch: a two-position track whose thumb follows a drag. */
+.cocreate-slider {
+  flex: none;
+  padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
+  background: var(--panel);
+}
+.cocreate-slider-track {
+  position: relative;
+  display: flex;
+  height: 36px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  touch-action: none;
+  user-select: none;
+  cursor: pointer;
+}
+.cocreate-slider-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: calc(var(--r-lg) - 3px);
+  background: var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  /* Own width = half the track minus the inset, so 100% lands it flush right. */
+  transform: translateX(calc(var(--pos) * 100%));
+  transition: transform 0.18s ease;
+}
+.cocreate-slider-track.dragging .cocreate-slider-thumb {
+  transition: none;
+}
+.cocreate-slider-label {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  transition: color 0.18s ease;
+}
+.cocreate-slider-label.on {
+  color: var(--on-accent);
+}

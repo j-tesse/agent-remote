@@ -328,6 +328,7 @@ export function createClaudeAdapter(
     // The CLI emits its own `prompt_suggestion` (see promptSuggestions:true in
     // ClaudeChatSession) → the generic suggestion generator skips this harness.
     nativePromptSuggestions: true,
+    appendsSystemPrompt: true,
     // Unused for the chat path (SDK spawns its own executable) but interface-required.
     invocation(_opts: SessionOptions): { command: string; args: string[] } {
       return { command: cfg.command, args: [] };
@@ -506,6 +507,16 @@ class ClaudeChatSession implements ChatSession {
         // Backend host tools (spawn/drive other sessions) as an in-process MCP
         // server. Rebuilt per launch: a server instance binds one transport.
         ...(this.opts.hostTools ? hostToolOptions(this.opts.hostTools) : {}),
+        // Co-create framing: keep the Claude Code prompt, append ours.
+        ...(this.opts.appendSystemPrompt
+          ? {
+              systemPrompt: {
+                type: "preset" as const,
+                preset: "claude_code" as const,
+                append: this.opts.appendSystemPrompt,
+              },
+            }
+          : {}),
         includePartialMessages: true,
         // Without this the SDK forwards only a sub-agent's tool_use/tool_result
         // blocks (a heartbeat); with it the whole nested conversation arrives,

@@ -30,6 +30,7 @@ import {
   isEmptyChat,
 } from "../../shared/chat.js";
 import { normalizeFolder } from "../paths.js";
+import { CONTENT_TYPES, type ContentPointer } from "../../shared/content.js";
 
 /** `start()` options: the adapter's own, plus manager-level flags adapters never see a use for. */
 export interface StartOptions extends SessionOptions {
@@ -39,6 +40,8 @@ export interface StartOptions extends SessionOptions {
   replaces?: string;
   /** Session whose agent started this one (host tool); → `SessionInfo.spawnedBy`. */
   spawnedBy?: string;
+  /** Co-create pointer (already validated); → `SessionInfo.content` + framing. */
+  content?: ContentPointer;
 }
 
 /** Builds the host tools for a new session (server/sessionTools.ts). */
@@ -190,7 +193,18 @@ export class SessionManager {
       currentCommand: null,
       ...(opts.parent ? { parentId: opts.parent } : {}),
       ...(opts.spawnedBy ? { spawnedBy: opts.spawnedBy } : {}),
+      ...(opts.content ? { content: opts.content } : {}),
     };
+    if (opts.content) {
+      if (!isChat || !adapter.appendsSystemPrompt)
+        throw new Error(`${adapter.name} can't host a co-create session.`);
+      opts = {
+        ...opts,
+        appendSystemPrompt: CONTENT_TYPES[opts.content.mediaType].instructions(
+          opts.content.path,
+        ),
+      };
+    }
     // Bound by id, resolved lazily at call time — the session isn't registered yet.
     const hostTools = isChat ? this.hostTools?.(info.id) : undefined;
     if (hostTools) opts = { ...opts, hostTools };
