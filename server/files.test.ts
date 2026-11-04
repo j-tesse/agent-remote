@@ -3,7 +3,13 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from "node:fs/promis
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDownload, parseRange, saveBinaryFile, statEntry } from "./files.js";
+import {
+  ensureTextFile,
+  openDownload,
+  parseRange,
+  saveBinaryFile,
+  statEntry,
+} from "./files.js";
 
 // The transfer functions are the ones that touch arbitrary bytes, so their
 // confinement to the folder root is the security boundary worth pinning.
@@ -162,5 +168,26 @@ describe("saveBinaryFile", () => {
     await expect(
       saveBinaryFile(root, "bad\0name.txt", Readable.from(["x"])),
     ).rejects.toThrow(/invalid path/i);
+  });
+});
+
+describe("ensureTextFile", () => {
+  it("creates a missing file with its parent dirs, empty", async () => {
+    expect(await ensureTextFile(root, "docs/new/plan.md")).toBe(true);
+    expect(await readFile(join(root, "docs/new/plan.md"), "utf8")).toBe("");
+  });
+
+  it("leaves an existing file untouched", async () => {
+    expect(await ensureTextFile(root, "hello.txt")).toBe(false);
+    expect(await readFile(join(root, "hello.txt"), "utf8")).toBe("hi");
+  });
+
+  it("refuses directories and escapes", async () => {
+    await mkdir(join(root, "adir"), { recursive: true });
+    await expect(ensureTextFile(root, "adir")).rejects.toThrow(/directory/);
+    await expect(ensureTextFile(root, "")).rejects.toThrow();
+    await expect(ensureTextFile(root, "../outside/x.md")).rejects.toThrow(/outside/);
+    await expect(ensureTextFile(root, join(outside, "y.md"))).rejects.toThrow(/outside/);
+    expect(await readdir(outside)).toEqual(["secret.txt"]);
   });
 });

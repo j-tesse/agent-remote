@@ -78,6 +78,29 @@ export async function writeTextFile(
   await fsWriteFile(file, content, "utf8");
 }
 
+/** Make sure a text file exists under `root` (co-create's Create flow): creates
+ * parent dirs + an empty file if missing, never touches an existing one.
+ * Returns whether it was created. */
+export async function ensureTextFile(root: string, rel: string): Promise<boolean> {
+  const file = resolveWithin(root, rel);
+  if (file === resolve(root)) throw new Error("Path is the folder itself.");
+  try {
+    if ((await stat(file)).isDirectory()) throw new Error("Path is a directory.");
+    return false;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  await mkdir(dirname(file), { recursive: true });
+  try {
+    await fsWriteFile(file, "", { flag: "wx" });
+    return true;
+  } catch (err) {
+    // Lost a race to another creator: it exists now, which is all we wanted.
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  }
+}
+
 // --- transfer (upload/download) ------------------------------------------
 // These deliberately skip readTextFile's binary/size refusals: those are
 // *editor* constraints (a browser text field), not filesystem ones. Transfer

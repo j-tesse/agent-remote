@@ -505,6 +505,24 @@ function renderToolBody(body: ToolBody): string {
   }
 }
 
+/** Whole-text diff as `.chat-tool-diff` rows (co-create's "changes" view):
+ * same pipeline and markup as an Edit tool's body. */
+export function renderTextDiff(
+  oldText: string,
+  newText: string,
+): { html: string; added: number; removed: number } {
+  const lines = markWordDiff(lineDiff(oldText, newText));
+  const { added, removed } = diffStats(lines);
+  const rows = diffRows(lines)
+    .map((row) =>
+      row.kind === "fold"
+        ? `<span class="diff-fold">${escapeHtml(diffFoldLabel(row.count))}</span>`
+        : renderDiffLine(row.line),
+    )
+    .join("");
+  return { html: `<pre class="chat-tool-diff">${rows}</pre>`, added, removed };
+}
+
 /** Status glyph shown on a tool part (matches ChatView's ToolPart). */
 export function toolGlyph(status: string): string {
   return status === "done"

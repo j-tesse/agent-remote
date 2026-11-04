@@ -6,6 +6,7 @@ import type {
   FolderInfo,
   ServerMessage,
   SessionInfo,
+  ContentPointer,
 } from "../shared/protocol";
 import { applyChatEvent, emptyChatState } from "../shared/chat";
 
@@ -55,6 +56,7 @@ export class Client {
   private foldersListeners = new Set<FoldersListener>();
   private outputListeners = new Map<string, Set<OutputSubscriber>>();
   private chatListeners = new Map<string, Set<ChatListener>>();
+  private contentListeners = new Map<string, Set<(version: string) => void>>();
   // Sticky Ctrl: armed by the on-screen Ctrl key, applied to subsequent input.
   private ctrlMode: CtrlMode = "off";
   private ctrlListeners = new Set<CtrlListener>();
@@ -178,6 +180,9 @@ export class Client {
         this.home = msg.home;
         this.emitFolders();
         break;
+      case "content":
+        for (const cb of this.contentListeners.get(msg.sessionId) ?? []) cb(msg.version);
+        break;
       case "error":
         console.error("agent-remote backend error:", msg.message);
         break;
@@ -192,8 +197,12 @@ export class Client {
     }
   }
 
-  start(harnessId: string, cwd?: string, resume?: string, replaces?: string): void {
-    this.send({ type: "start", harnessId, cwd, resume, replaces });
+  start(
+    harnessId: string,
+    cwd?: string,
+    opts: { resume?: string; replaces?: string; content?: ContentPointer } = {},
+  ): void {
+    this.send({ type: "start", harnessId, cwd, ...opts });
   }
   input(sessionId: string, data: string): void {
     if (this.ctrlMode !== "off") {
@@ -265,6 +274,14 @@ export class Client {
     this.foldersListeners.add(cb);
     cb(this.folders, this.home);
     return () => this.foldersListeners.delete(cb);
+  }
+
+  /** A co-create session's content changed on disk (refetch it). */
+  onContent(sessionId: string, cb: (version: string) => void): () => void {
+    let set = this.contentListeners.get(sessionId);
+    if (!set) this.contentListeners.set(sessionId, (set = new Set()));
+    set.add(cb);
+    return () => set!.delete(cb);
   }
 
   onCtrl(cb: CtrlListener): () => void {

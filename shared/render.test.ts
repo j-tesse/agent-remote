@@ -16,6 +16,7 @@ import {
   thinkingSummary,
   toolView,
   wordDiff,
+  renderTextDiff,
 } from "./render.js";
 import type { DiffLine } from "./render.js";
 import type { ChatMessage, ChatPart } from "./protocol.js";
@@ -639,5 +640,20 @@ describe("spawnedSessionId", () => {
     expect(spawnedSessionId(tool("Spawn limit reached"))).toBeUndefined();
     expect(spawnedSessionId(tool('{"sessionId":"abc"}'))).toBeUndefined();
     expect(spawnedSessionId(tool('{"spawnedSession": broken'))).toBeUndefined();
+  });
+});
+
+describe("renderTextDiff", () => {
+  it("diffs whole texts with the tool-diff markup", () => {
+    const { html, added, removed } = renderTextDiff("# A\n\nold line\n", "# A\n\nnew line\n");
+    expect(added).toBe(1);
+    expect(removed).toBe(1);
+    expect(html).toContain('class="chat-tool-diff"');
+    expect(html).toContain('class="diff-add"');
+    expect(html).toContain('class="diff-word"');
+  });
+
+  it("reports no changes for identical text", () => {
+    expect(renderTextDiff("x\n", "x\n")).toMatchObject({ added: 0, removed: 0 });
   });
 });

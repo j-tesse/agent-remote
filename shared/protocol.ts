@@ -2,10 +2,15 @@
 // This is intentionally harness-agnostic: it describes sessions and terminal
 // I/O, never anything specific to Claude Code, pi, or any other agent.
 
+import type { ContentPointer } from "./content.js";
+export type { ContentPointer } from "./content.js";
+
 /** A harness the backend is configured to expose. */
 export interface HarnessInfo {
   id: string;
   name: string;
+  /** Can host a co-create session (the adapter appends to its system prompt). */
+  coCreate?: boolean;
 }
 
 /** How the browser renders a session: a raw terminal (xterm) or a chat-bubble
@@ -40,6 +45,8 @@ export interface SessionInfo {
   /** Top-level session an agent started via the `spawn_session` host tool:
    * provenance only (lifecycle is independent). Not focused on spawn. */
   spawnedBy?: string;
+  /** Co-create session: the content its preview pane shows. Fixed at launch. */
+  content?: ContentPointer;
   createdAt: number;
   /** Command line currently executing in the session, or null when idle at the
    * prompt. Kept live by shell integration; always null for harnesses without
@@ -75,6 +82,8 @@ export interface ResumableSession {
   /** First user prompt (first line), or "" if the session never got one. */
   title: string;
   updatedAt: number;
+  /** Co-create pointer, so resuming restores the preview pane. */
+  content?: ContentPointer;
 }
 
 /** Executables/commands available for the command builder, for a given cwd.
@@ -1032,7 +1041,15 @@ export type ChatAction =
 /** Messages the browser sends to the backend. */
 export type ClientMessage =
   /** `replaces`: session to swap out for this one, if it's an empty chat (resume). */
-  | { type: "start"; harnessId: string; cwd?: string; resume?: string; replaces?: string }
+  | {
+      type: "start";
+      harnessId: string;
+      cwd?: string;
+      resume?: string;
+      replaces?: string;
+      /** Co-create pointer; the server creates the file if it's missing. */
+      content?: ContentPointer;
+    }
   | { type: "input"; sessionId: string; data: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
   | { type: "stop"; sessionId: string }
@@ -1066,4 +1083,6 @@ export type ServerMessage =
   /** `home` rides along so the client can display paths home-relative (`~/x`);
    * stored paths stay absolute — this is display only. */
   | { type: "folders"; folders: FolderInfo[]; home: string }
+  /** A co-create session's content changed on disk; refetch it. */
+  | { type: "content"; sessionId: string; version: string }
   | { type: "error"; message: string; sessionId?: string };
