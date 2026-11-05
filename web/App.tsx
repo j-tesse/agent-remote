@@ -1535,6 +1535,8 @@ function Workspace({
                                 patchSection(
                                   "permissions",
                                   {
+                                    // Tuning the wait implies wanting the assistant on.
+                                    enabled: true,
                                     delayScale:
                                       Number(e.target.value) /
                                       AUTO_DELAY_TYPICAL_SEC,
