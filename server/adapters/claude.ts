@@ -345,7 +345,9 @@ export function zodParam(p: HostToolParam): z.ZodType {
       ? z.number()
       : p.type === "boolean"
         ? z.boolean()
-        : p.type === "object"
+        : p.type === "object" && p.values
+          ? z.record(z.string(), zodParam({ ...p.values, optional: false }))
+          : p.type === "object"
           ? // Strict: an unknown key should fail loudly, not be silently stripped.
             z.strictObject(
               Object.fromEntries(

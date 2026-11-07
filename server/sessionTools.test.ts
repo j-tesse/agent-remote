@@ -6,11 +6,13 @@ import {
   lastReply,
   overlayAssistant,
   ASSISTANT_PARAM,
+  describeRequest,
+  answerAction,
 } from "./sessionTools.js";
 import { zodParam } from "./adapters/claude.js";
 import { SessionManager } from "./sessions/manager.js";
 import { emptyChatState } from "../shared/chat.js";
-import type { ChatMessage, ChatState } from "../shared/protocol.js";
+import type { ChatMessage, ChatState, ChatUiRequest } from "../shared/protocol.js";
 
 const msg = (role: ChatMessage["role"], text: string): ChatMessage => ({
   id: Math.random().toString(36),
@@ -203,5 +205,73 @@ describe("zodParam (nested host-tool params)", () => {
   it("rejects wrong types and unknown keys", () => {
     expect(schema.safeParse({ autoPr: { enabled: "yes" } }).success).toBe(false);
     expect(schema.safeParse({ autoPr: { bogus: 1 } }).success).toBe(false);
+  });
+  it("maps a `values` object to a string-keyed record", () => {
+    const rec = zodParam({ type: "object", description: "m", values: { type: "string", description: "v" } });
+    expect(rec.safeParse({ "Which db?": "Postgres" }).success).toBe(true);
+    expect(rec.safeParse({ "Which db?": 3 }).success).toBe(false);
+  });
+});
+
+describe("question cards for the spawning session", () => {
+  const q: ChatUiRequest = {
+    id: "r1",
+    kind: "questions",
+    title: "Question",
+    questions: [
+      { question: "Which db?", options: [{ label: "Postgres" }, { label: "SQLite" }] },
+      { question: "Extras?", multiSelect: true, options: [{ label: "a" }, { label: "b" }] },
+    ],
+  };
+  const perm: ChatUiRequest = {
+    id: "r2",
+    kind: "select",
+    title: "Allow Bash?",
+    options: [{ value: "allow", label: "Allow", intent: "accept" }],
+    tool: { name: "Bash", args: { command: "x".repeat(5000) } },
+  };
+
+  it("describes a card with what's needed to answer it", () => {
+    expect(describeRequest(q)).toEqual({
+      requestId: "r1",
+      kind: "questions",
+      title: "Question",
+      answerable: true,
+      questions: [
+        { question: "Which db?", options: ["Postgres", "SQLite"] },
+        { question: "Extras?", multiSelect: true, options: ["a", "b"] },
+      ],
+    });
+    const d = describeRequest(perm);
+    expect(d.answerable).toBe(false);
+    expect(d.tool).toBe("Bash");
+    expect(d.toolArgs!.length).toBeLessThan(2100); // truncated
+  });
+
+  it("builds the ui-response for a fully answered questions card", () => {
+    expect(answerAction(q, { answers: { "Which db?": "SQLite", "Extras?": " a, b " } })).toEqual({
+      type: "ui-response",
+      requestId: "r1",
+      answers: { "Which db?": "SQLite", "Extras?": "a, b" },
+    });
+  });
+
+  it("rejects missing, unknown or malformed answers", () => {
+    expect(() => answerAction(q, { answers: { "Which db?": "SQLite" } })).toThrow(/Missing answer/);
+    expect(() =>
+      answerAction(q, { answers: { "Which db?": "x", "Extras?": "a", Nope: "y" } }),
+    ).toThrow(/Unknown question/);
+    expect(() => answerAction(q, {})).toThrow(/answers/);
+  });
+
+  it("answers input cards with text", () => {
+    const input: ChatUiRequest = { id: "r3", kind: "input", title: "Name?" };
+    expect(answerAction(input, { text: "bob" })).toEqual({ type: "ui-response", requestId: "r3", value: "bob" });
+    expect(() => answerAction(input, {})).toThrow(/text/);
+  });
+
+  it("never answers permission or plan cards", () => {
+    expect(() => answerAction(perm, { text: "allow" })).toThrow(/needs the user/);
+    expect(() => answerAction({ id: "p", kind: "plan", title: "Plan" }, {})).toThrow(/needs the user/);
   });
 });
