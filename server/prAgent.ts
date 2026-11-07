@@ -13,6 +13,7 @@ import type { AssistantSettings, ChatEvent } from "../shared/protocol.js";
 import { ALLOW_EVERYTHING, deriveAssistantEnabled } from "../shared/chat.js";
 import { supervisePr } from "./llm.js";
 import { buildSuggestionTranscript } from "./suggestions.js";
+import type { GitResult } from "./git.js";
 
 /** How many agent turns the supervisor may drive before giving up. */
 const MAX_PR_TURNS = 12;
@@ -20,6 +21,45 @@ const MAX_PR_TURNS = 12;
 const MAX_RUN_MS = 10 * 60_000;
 /** Per-turn cap; the `/pr` skill reads the diff and runs `gh`, so it's generous. */
 const TURN_TIMEOUT_MS = 5 * 60_000;
+
+/** A git command the auto-PR flow ran before handing over. */
+export interface RanCommand {
+  args: string[];
+  result: GitResult;
+}
+
+/** Per-command output cap in the framing (push progress can be chatty). */
+const MAX_COMMAND_OUTPUT = 1_500;
+
+/** POSIX-quote one argv entry, only when it needs it. */
+export function shellQuote(arg: string): string {
+  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Render the commands as a terminal transcript (`$ git …` + output). Pure. */
+export function formatCommandLog(commands: RanCommand[]): string {
+  return commands
+    .map(({ args, result }) => {
+      let out = [result.stdout, result.stderr]
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .join("\n");
+      if (out.length > MAX_COMMAND_OUTPUT) out = `${out.slice(0, MAX_COMMAND_OUTPUT)}\n…`;
+      const status = result.ok ? "" : "\n(exited non-zero)";
+      return `$ ${["git", ...args].map(shellQuote).join(" ")}${out ? `\n${out}` : ""}${status}`;
+    })
+    .join("\n\n");
+}
+
+/** Framing for the PR session: the auto-PR flow already did the branch/commit/
+ * push prep a PR skill would otherwise re-check, and nobody approves a draft —
+ * each skipped check or approval round is a whole extra turn. */
+export function prSessionFraming(commands: RanCommand[] = []): string {
+  const log = formatCommandLog(commands);
+  return `You're run by an LLM-based agent in an automated PR workflow. Branch is committed and pushed — skip those checks, don't ask for approval, just create the PR. Keep the description file out of the repo. Reply with the PR URL.${
+    log ? `\n\nAlready ran:\n\`\`\`\n${log}\n\`\`\`` : ""
+  }`;
+}
 
 export interface PrResult {
   prNumber: number | null;
@@ -58,6 +98,8 @@ export async function runPrSession(
     harnessId: string;
     command: string;
     instructions?: string;
+    /** Git commands the flow already ran, shown to the agent in its framing. */
+    history?: RanCommand[];
     report: Report;
     /** The spawned session, as soon as it exists — so the caller's notes can
      * link to its tab (it's left open for a human on any failure). */
@@ -66,13 +108,18 @@ export async function runPrSession(
     parent?: string;
   },
 ): Promise<PrResult | null> {
-  const { folder, harnessId, command, instructions, report, onSession, parent } =
+  const { folder, harnessId, command, instructions, report, onSession, parent, history } =
     opts;
 
   let sessionId: string;
   try {
     // Nested under the origin: watched inline in its note, lifecycle tied to it.
-    sessionId = manager.start(harnessId, { cwd: folder, parent }).id;
+    // Harnesses without `appendsSystemPrompt` just run unframed.
+    sessionId = manager.start(harnessId, {
+      cwd: folder,
+      parent,
+      appendSystemPrompt: prSessionFraming(history),
+    }).id;
   } catch (err) {
     report(`Could not start the ${harnessId} session`, (err as Error).message);
     return null;
