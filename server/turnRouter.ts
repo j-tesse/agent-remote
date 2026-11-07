@@ -179,9 +179,12 @@ export function attachTurnRouter(
   };
 
   /** Take the single-flight lock, pin the anchor, run `body`, always release. */
-  const guard = (sessionId: string, body: () => Promise<void>) => {
+  const guard = (sessionId: string, label: string, body: () => Promise<void>) => {
     if (running.has(sessionId)) return;
     running.add(sessionId);
+    // Taken synchronously on the settle event, so a watcher (wait_session) never
+    // sees the gap between the turn ending and the run starting as "idle".
+    const release = manager.holdAssistant(sessionId, label);
     const state = manager.chatState(sessionId);
     anchors.set(
       sessionId,
@@ -202,6 +205,7 @@ export function attachTurnRouter(
         });
       })
       .finally(() => {
+        release();
         running.delete(sessionId);
         anchors.delete(sessionId);
       });
@@ -260,7 +264,12 @@ export function attachTurnRouter(
         { trace: verdict?.trace, offerAutoPr: !submit },
       );
       if (submit) {
-        await runAutoPr(ctx, config, { continueIfNothing: true });
+        const release = manager.holdAssistant(sessionId, "auto-pr");
+        try {
+          await runAutoPr(ctx, config, { continueIfNothing: true });
+        } finally {
+          release();
+        }
         return;
       }
     }
@@ -279,7 +288,13 @@ export function attachTurnRouter(
       // The PR stage already posted its own "Run anyways".
       { trace: verdict?.trace, offerAutoPr: false },
     );
-    if (go) await runContinuity(ctx, { afterPr: false });
+    if (!go) return;
+    const release = manager.holdAssistant(sessionId, "continuity");
+    try {
+      await runContinuity(ctx, { afterPr: false });
+    } finally {
+      release();
+    }
   }
 
   return manager.subscribe({
@@ -299,7 +314,7 @@ export function attachTurnRouter(
       if (action.type !== "run-auto-pr") return;
       const folder = manager.sessionFolder(sessionId);
       if (!folder) return;
-      guard(sessionId, async () => {
+      guard(sessionId, "auto-pr", async () => {
         await runAutoPr(contextFor(sessionId, folder, "auto-pr"), config);
       });
     },
@@ -312,7 +327,7 @@ export function attachTurnRouter(
       if (!armed.delete(sessionId)) return;
       const state = manager.chatState(sessionId);
       if (!state || !shouldRouteTurn(state)) return;
-      guard(sessionId, () => route(sessionId));
+      guard(sessionId, "turn-router", () => route(sessionId));
     },
   });
 }

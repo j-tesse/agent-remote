@@ -96,6 +96,8 @@ export interface SessionListener {
   onChatAction?(sessionId: string, action: ChatAction): void;
   /** The session reported its resume key (persist it so it can be resumed). */
   onResumable?(sessionId: string, key: string): void;
+  /** Backend AI-assistant work on a session started/finished (`holdAssistant`). */
+  onAssistantWork?(sessionId: string, working: string[]): void;
 }
 
 // Owns agent-subprocess lifecycle, harness-agnostically: asks an adapter only
@@ -123,6 +125,36 @@ export class SessionManager {
   subscribe(listener: SessionListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** session → labels of AI-assistant work in flight (one entry per hold). */
+  private assistantHolds = new Map<string, string[]>();
+
+  /** Mark backend AI-assistant work (auto-PR, continuity, a card verdict) as in
+   * flight on a session — invisible in ChatState, so a watcher would otherwise
+   * read the session as idle mid-run. Returns an idempotent release. */
+  holdAssistant(sessionId: string, label: string): () => void {
+    const add = (delta: 1 | -1) => {
+      const list = [...(this.assistantHolds.get(sessionId) ?? [])];
+      if (delta > 0) list.push(label);
+      else if (list.includes(label)) list.splice(list.indexOf(label), 1);
+      else return; // already dropped with its session
+      if (list.length) this.assistantHolds.set(sessionId, list);
+      else this.assistantHolds.delete(sessionId);
+      for (const l of this.listeners) l.onAssistantWork?.(sessionId, list);
+    };
+    add(1);
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      add(-1);
+    };
+  }
+
+  /** Labels of AI-assistant work in flight on a session (empty = none). */
+  assistantWork(sessionId: string): string[] {
+    return this.assistantHolds.get(sessionId) ?? [];
   }
 
   list(): SessionInfo[] {
@@ -572,6 +604,7 @@ export class SessionManager {
     }
     if (session.info.status !== "exited") this.kill(session);
     this.sessions.delete(sessionId);
+    this.assistantHolds.delete(sessionId);
     for (const l of this.listeners) l.onRemoved?.(sessionId);
     // Parent is gone now, so each child takes the hard path above.
     for (const s of [...this.sessions.values()])

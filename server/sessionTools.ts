@@ -38,13 +38,17 @@ export class SpawnLimiter {
 export type ChildStatus = "running" | "idle" | "waiting-for-input" | "exited";
 
 /** Where a child stands. `sent` = prompts we've sent it: until all are echoed
- * as user turns, a not-yet-busy session is still starting, not idle. */
+ * as user turns, a not-yet-busy session is still starting, not idle.
+ * `assistantWork` = backend AI-assistant work in flight (auto-PR, continuity, a
+ * card being auto-answered) — the turn isn't over until that is. */
 export function childStatus(
   state: ChatState | undefined,
   info: Pick<SessionInfo, "status"> | undefined,
   sent: number,
+  assistantWork: readonly string[] = [],
 ): ChildStatus {
   if (!info || info.status === "exited" || !state) return "exited";
+  if (assistantWork.length) return "running";
   if (state.pendingRequests.length) return "waiting-for-input";
   if (state.busy || state.streaming || state.queued.length || state.autoPrompt)
     return "running";
@@ -171,11 +175,15 @@ export function attachSessionTools(
     const child = children.get(id);
     const info = manager.sessionInfo(id);
     const state = manager.chatState(id);
-    const status = childStatus(state, info, child?.sent ?? 0);
+    const work = manager.assistantWork(id);
+    const status = childStatus(state, info, child?.sent ?? 0, work);
     return {
       sessionId: id,
       harness: info?.harnessId,
       status,
+      ...(status === "running" && work.length
+        ? { assistant: [...new Set(work)] }
+        : {}),
       ...(status === "idle" || status === "exited"
         ? { reply: lastReply(state) }
         : {}),
@@ -198,21 +206,33 @@ export function attachSessionTools(
     new Promise<void>((resolve) => {
       const sent = () => children.get(id)?.sent ?? 0;
       const check = () =>
-        childStatus(manager.chatState(id), manager.sessionInfo(id), sent()) !==
-        "running";
+        childStatus(
+          manager.chatState(id),
+          manager.sessionInfo(id),
+          sent(),
+          manager.assistantWork(id),
+        ) !== "running";
       if (check()) return resolve();
+      let finished = false;
       const done = () => {
+        if (finished) return;
+        finished = true;
         clearTimeout(timer);
         unsubscribe();
         resolve();
       };
+      // Deferred: the event that ends a turn is also what makes the turn router /
+      // card decider take their hold, and they may be later listeners than us.
+      const recheck = (sid: string) =>
+        sid === id && setImmediate(() => check() && done());
       const timer = setTimeout(done, sec * 1000);
       const unsubscribe = manager.subscribe({
         onStarted() {},
         onOutput() {},
         onExit: (sid) => sid === id && done(),
         onRemoved: (sid) => sid === id && done(),
-        onChatEvent: (sid) => sid === id && check() && done(),
+        onChatEvent: recheck,
+        onAssistantWork: recheck,
       });
     });
 
@@ -287,7 +307,7 @@ export function attachSessionTools(
     {
       name: "wait_session",
       description:
-        "Wait (bounded) for a session you spawned to finish its turn. Returns status running (timed out — call again), idle (with its reply), waiting-for-input (a permission/question card awaits the user), or exited.",
+        "Wait (bounded) for a session you spawned to finish its turn, including any AI-assistant work that follows it (auto-PR, continuity, auto-answered cards). Returns status running (timed out — call again; `assistant` names AI-assistant work still in flight), idle (with its reply), waiting-for-input (a permission/question card awaits the user), or exited.",
       readOnly: true,
       params: {
         sessionId: { type: "string", description: "Id from spawn_session." },
@@ -317,7 +337,12 @@ export function attachSessionTools(
         const prompt = str(args.prompt);
         const child = own(caller, id);
         if (!prompt) throw new Error("prompt is required");
-        const status = childStatus(manager.chatState(id), manager.sessionInfo(id), child.sent);
+        const status = childStatus(
+          manager.chatState(id),
+          manager.sessionInfo(id),
+          child.sent,
+          manager.assistantWork(id),
+        );
         if (status !== "idle")
           throw new Error(`Session is ${status}; only an idle session takes a prompt`);
         send(id, prompt);
