@@ -24,13 +24,15 @@ export interface SessionOptions {
   appendSystemPrompt?: string;
 }
 
-/** A harness-agnostic tool the backend offers an agent. Schema is a flat map of
- * scalar params — enough for our tools, and trivially mapped to zod/JSON schema. */
+/** A harness-agnostic tool param: scalars plus nested objects — trivially
+ * mapped to zod/JSON schema. */
 export interface HostToolParam {
-  type: "string" | "number";
+  type: "string" | "number" | "boolean" | "object";
   description: string;
   optional?: boolean;
   enum?: string[];
+  /** Fields of an `object` param. */
+  properties?: Record<string, HostToolParam>;
 }
 
 export interface HostTool {

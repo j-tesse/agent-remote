@@ -339,13 +339,22 @@ export function createClaudeAdapter(
   };
 }
 
-function zodParam(p: HostToolParam): z.ZodType {
+export function zodParam(p: HostToolParam): z.ZodType {
   let t: z.ZodType =
     p.type === "number"
       ? z.number()
-      : p.enum?.length
-        ? z.enum(p.enum as [string, ...string[]])
-        : z.string();
+      : p.type === "boolean"
+        ? z.boolean()
+        : p.type === "object"
+          ? // Strict: an unknown key should fail loudly, not be silently stripped.
+            z.strictObject(
+              Object.fromEntries(
+                Object.entries(p.properties ?? {}).map(([k, q]) => [k, zodParam(q)]),
+              ),
+            )
+          : p.enum?.length
+            ? z.enum(p.enum as [string, ...string[]])
+            : z.string();
   t = t.describe(p.description);
   return p.optional ? t.optional() : t;
 }
