@@ -8,6 +8,7 @@ import {
   ASSISTANT_PARAM,
 } from "./sessionTools.js";
 import { zodParam } from "./adapters/claude.js";
+import { SessionManager } from "./sessions/manager.js";
 import { emptyChatState } from "../shared/chat.js";
 import type { ChatMessage, ChatState } from "../shared/protocol.js";
 
@@ -67,6 +68,47 @@ describe("childStatus", () => {
       pendingRequests: [{ id: "r", kind: "select", title: "Allow Bash?" }],
     });
     expect(childStatus(s, running, 1)).toBe("waiting-for-input");
+  });
+});
+
+describe("childStatus with AI-assistant work", () => {
+  const idle = state({ messages: [msg("user", "hi"), msg("assistant", "done")] });
+
+  it("an idle turn still runs while auto-PR/continuity work is in flight", () => {
+    expect(childStatus(idle, running, 1, ["auto-pr"])).toBe("running");
+    expect(childStatus(idle, running, 1, [])).toBe("idle");
+  });
+
+  it("a card the assistant is answering isn't waiting on a human", () => {
+    const s = state({ pendingRequests: [{ id: "r", kind: "select", title: "Allow?" }] });
+    expect(childStatus(s, running, 1, ["permissions"])).toBe("running");
+    expect(childStatus(s, running, 1)).toBe("waiting-for-input");
+  });
+
+  it("exited still wins", () => {
+    expect(childStatus(idle, { status: "exited" }, 1, ["auto-pr"])).toBe("exited");
+  });
+});
+
+describe("SessionManager.holdAssistant", () => {
+  it("ref-counts labels, notifies, and releases idempotently", () => {
+    const m = new SessionManager(new Map());
+    const seen: string[][] = [];
+    m.subscribe({
+      onStarted() {},
+      onOutput() {},
+      onExit() {},
+      onAssistantWork: (_id, w) => seen.push([...w]),
+    });
+    const a = m.holdAssistant("s", "turn-router");
+    const b = m.holdAssistant("s", "auto-pr");
+    expect(m.assistantWork("s")).toEqual(["turn-router", "auto-pr"]);
+    b();
+    b();
+    expect(m.assistantWork("s")).toEqual(["turn-router"]);
+    a();
+    expect(m.assistantWork("s")).toEqual([]);
+    expect(seen).toEqual([["turn-router"], ["turn-router", "auto-pr"], ["turn-router"], []]);
   });
 });
 

@@ -81,13 +81,19 @@ export function attachAssistant(manager: SessionManager): () => void {
   // Grace timers per pending request; `handled` dedupes evaluation per id. A
   // request is dropped from both when it resolves or its verdict is cleared.
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const handled = new Set<string>();
+  // Value = the session hold: a card the decider will answer isn't waiting on a
+  // human, so wait_session must not report it as such.
+  const handled = new Map<string, () => void>();
+  const unhandle = (requestId: string) => {
+    handled.get(requestId)?.();
+    handled.delete(requestId);
+  };
 
   const drop = (requestId: string) => {
     const t = timers.get(requestId);
     if (t) clearTimeout(t);
     timers.delete(requestId);
-    handled.delete(requestId);
+    unhandle(requestId);
   };
 
   return manager.subscribe({
@@ -124,7 +130,10 @@ export function attachAssistant(manager: SessionManager): () => void {
         (isQuestions && settings.questions.enabled);
       if (!want) return;
 
-      handled.add(req.id);
+      handled.set(
+        req.id,
+        manager.holdAssistant(sessionId, isPermission ? "permissions" : "questions"),
+      );
       // Grace window scales with card size; permission cards honour the
       // user's scale, questions keep the default.
       const delayMs = autoActionDelayMs(
@@ -138,12 +147,12 @@ export function attachAssistant(manager: SessionManager): () => void {
         manager.postAssistantDecision(sessionId, decision);
         // `deny` never auto-acts — a human confirms it (matches prior UX).
         if (decision.action === "deny") {
-          handled.delete(req.id);
+          unhandle(req.id);
           return;
         }
         const t = setTimeout(() => {
           timers.delete(req.id);
-          handled.delete(req.id);
+          unhandle(req.id);
           // A connected human may have taken over during the grace window.
           if (stillPending(manager, sessionId, req.id))
             apply(manager, sessionId, req, decision);
@@ -159,7 +168,7 @@ export function attachAssistant(manager: SessionManager): () => void {
           delayMs,
         );
         if (!decision) {
-          handled.delete(req.id);
+          unhandle(req.id);
           return;
         }
         // Still trace it, so the transcript records every auto-acceptance.
@@ -210,7 +219,7 @@ export function attachAssistant(manager: SessionManager): () => void {
             });
           }
           if (!verdict.available || !verdict.action || verdict.action === "none") {
-            handled.delete(req.id);
+            unhandle(req.id);
             return;
           }
           // Gone already? (a client answered or cancelled during evaluation)
@@ -221,14 +230,14 @@ export function attachAssistant(manager: SessionManager): () => void {
 
           const decision = toDecision(req, verdict, delayMs);
           if (!decision) {
-            handled.delete(req.id);
+            unhandle(req.id);
             return;
           }
           // Broadcast so every client shows the countdown (or the deny hint).
           commit(decision);
         })
         .catch(() => {
-          handled.delete(req.id);
+          unhandle(req.id);
         });
     },
   });
