@@ -3,8 +3,9 @@
 // ChatAction/ChatState through the manager; each adapter exposes the HostToolSet
 // natively (claude: in-process MCP server). Spawns are rate-limited globally.
 import type { SessionManager } from "./sessions/manager.js";
-import type { HostTool, HostToolSet } from "./adapters/types.js";
-import type { ChatState, SessionInfo } from "../shared/protocol.js";
+import type { HostTool, HostToolParam, HostToolSet } from "./adapters/types.js";
+import type { AssistantSettings, ChatState, SessionInfo } from "../shared/protocol.js";
+import { emptyChatState } from "../shared/chat.js";
 import { normalizeFolder } from "./paths.js";
 import { messageText } from "./suggestions.js";
 
@@ -77,6 +78,85 @@ export function clampWaitSec(v: unknown): number {
 
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 
+const NEW_SESSION = ["never", "after-pr", "always"];
+const opt = (type: HostToolParam["type"], description: string, extra?: Partial<HostToolParam>): HostToolParam => ({
+  type,
+  description,
+  optional: true,
+  ...extra,
+});
+const enabledParam = opt("boolean", "Turn this capability on/off.");
+const instructionsParam = opt("string", "Free-text instructions (empty = default rubric).");
+
+/** Overlay for the child's AI-assistant checklist; omitted fields are inherited. */
+export const ASSISTANT_PARAM: HostToolParam = opt(
+  "object",
+  "AI-assistant settings for the new session, overlaid on this session's own (which it inherits by default); give only what should differ. E.g. {autoPr:{enabled:true}} opens a PR for the work once its turn finishes.",
+  {
+    properties: {
+      permissions: opt(
+        "object",
+        "Auto-answer tool permission prompts. Can only be disabled here, never enabled or loosened.",
+        { properties: { enabled: enabledParam } },
+      ),
+      questions: opt("object", "Auto-answer AskUserQuestion dialogs.", {
+        properties: {
+          enabled: enabledParam,
+          instructions: instructionsParam,
+          onlyIfSure: opt("boolean", "Abstain unless the right option is unambiguous."),
+        },
+      }),
+      autoPr: opt("object", "Commit, push and open a PR when a turn finishes the work.", {
+        properties: {
+          enabled: enabledParam,
+          instructions: instructionsParam,
+          autoMerge: opt("boolean", "Squash-merge the PR once checks pass."),
+        },
+      }),
+      continuity: opt("object", "Keep the agent working: write and send the next prompt unattended.", {
+        properties: {
+          enabled: enabledParam,
+          instructions: instructionsParam,
+          newSession: opt("string", "When to start a fresh session instead of replying in place.", {
+            enum: NEW_SESSION,
+          }),
+        },
+      }),
+    },
+  },
+);
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** `base` with `overlay` merged in, validated against ASSISTANT_PARAM. Throws on
+ * anything malformed, and on any attempt to grant permissions — a spawned
+ * session must never auto-accept more than its caller. */
+export function overlayAssistant(base: AssistantSettings, overlay: unknown): AssistantSettings {
+  const out = structuredClone(base);
+  if (overlay === undefined || overlay === null) return out;
+  if (!isObj(overlay)) throw new Error("assistant must be an object");
+  const sections = ASSISTANT_PARAM.properties!;
+  for (const [name, value] of Object.entries(overlay)) {
+    const fields = sections[name]?.properties;
+    if (!fields) throw new Error(`Unknown assistant setting: ${name}`);
+    if (!isObj(value)) throw new Error(`assistant.${name} must be an object`);
+    const target = out[name as keyof Omit<AssistantSettings, "enabled">] as unknown as Record<string, unknown>;
+    for (const [key, v] of Object.entries(value)) {
+      const spec = fields[key];
+      const path = `assistant.${name}.${key}`;
+      if (!spec) throw new Error(`Unknown assistant setting: ${path}`);
+      if (typeof v !== spec.type) throw new Error(`${path} must be a ${spec.type}`);
+      if (spec.enum && !spec.enum.includes(v as string))
+        throw new Error(`${path} must be one of ${spec.enum.join(", ")}`);
+      if (name === "permissions" && v !== false)
+        throw new Error("assistant.permissions can only be disabled for a spawned session");
+      target[key] = v;
+    }
+  }
+  return out;
+}
+
 /** Install the tools on `manager`. `knownFolders` = the folder allowlist. */
 export function attachSessionTools(
   manager: SessionManager,
@@ -146,7 +226,7 @@ export function attachSessionTools(
     {
       name: "spawn_session",
       description:
-        "Start a new, independent agent chat session that the user sees as an ordinary tab, and send it a first prompt. Returns immediately with its sessionId; use wait_session to get its reply. The new session has no memory of this conversation, so the prompt must be self-contained. Limited to " +
+        "Start a new, independent agent chat session that the user sees as an ordinary tab, and send it a first prompt. Returns immediately with its sessionId; use wait_session to get its reply. The new session has no memory of this conversation, so the prompt must be self-contained. It inherits this session's AI-assistant settings unless `assistant` overrides some. Limited to " +
         `${SPAWN_LIMIT} spawns per ${SPAWN_WINDOW_MS / 60_000} minutes across all sessions.`,
       params: {
         harness: {
@@ -161,6 +241,7 @@ export function attachSessionTools(
           description:
             "Absolute folder to run in; must be one already open in the UI. Defaults to this session's folder.",
         },
+        assistant: ASSISTANT_PARAM,
       },
       async run(args) {
         const harness = str(args.harness);
@@ -173,6 +254,11 @@ export function attachSessionTools(
         if (!folder) throw new Error("Calling session is gone");
         if (folder !== home && !knownFolders().map(normalizeFolder).includes(folder))
           throw new Error(`Folder is not open in the UI: ${folder}`);
+        // Validated before taking a slot, so a bad overlay spends nothing.
+        const assistant = overlayAssistant(
+          manager.chatState(caller)?.assistant ?? emptyChatState().assistant,
+          args.assistant,
+        );
         const slot = limiter.take();
         if (!slot.ok)
           throw new Error(
@@ -180,14 +266,22 @@ export function attachSessionTools(
           );
         const info = manager.start(harness, { cwd: folder, spawnedBy: caller });
         children.set(info.id, { owner: caller, sent: 0 });
-        // Inherit the caller's AI-assistant checklist, before the first prompt
-        // so its very first card is already covered.
-        const assistant = manager.chatState(caller)?.assistant;
-        if (assistant)
-          manager.chatAction(info.id, { type: "set-assistant", settings: assistant });
+        // Before the first prompt, so its very first card is already covered.
+        manager.chatAction(info.id, { type: "set-assistant", settings: assistant });
         send(info.id, prompt);
         // `spawnedSession` is what the UI keys its inline panel off (render.ts).
-        return JSON.stringify({ spawnedSession: info.id, harness, folder, status: "running" });
+        return JSON.stringify({
+          spawnedSession: info.id,
+          harness,
+          folder,
+          status: "running",
+          assistant: {
+            permissions: assistant.permissions.enabled,
+            questions: assistant.questions.enabled,
+            autoPr: assistant.autoPr.enabled,
+            continuity: assistant.continuity.enabled,
+          },
+        });
       },
     },
     {

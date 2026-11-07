@@ -108,4 +108,48 @@ describe.skipIf(!config || !enabled || !up)("claude-local: spawn_session host to
       for (const s of manager.list()) manager.remove(s.id);
     }
   }, 360_000);
+
+  it("applies an `assistant` overlay to the spawned session", async () => {
+    const manager = new SessionManager(buildAdapters(config!));
+    attachAssistant(manager);
+    attachSessionTools(manager, () => [DIR]);
+
+    const started: SessionInfo[] = [];
+    manager.subscribe({
+      onStarted: (info) => void started.push(info),
+      onOutput() {},
+      onExit() {},
+    });
+
+    const parent = manager.start("claude-local", { cwd: DIR });
+    manager.chatAction(parent.id, { type: "set-assistant", settings: allowAll() });
+    manager.chatAction(parent.id, {
+      type: "prompt",
+      text:
+        'Call the mcp__agent-remote__spawn_session tool with harness "claude-local", prompt "Reply with exactly the word PONG and nothing else.", ' +
+        'and assistant {"autoPr": {"enabled": true}}. Do nothing else.',
+    });
+
+    try {
+      await until(() => started.some((s) => s.spawnedBy === parent.id), 180_000, "spawn");
+      const child = started.find((s) => s.spawnedBy === parent.id)!;
+      const a = manager.chatState(child.id)!.assistant;
+      // Inherited fields survive the overlay.
+      expect(a.permissions.instructions).toBe(ALLOW_EVERYTHING);
+      const st = manager.chatState(parent.id)!;
+      const spawn = [...st.messages, ...(st.streaming ? [st.streaming] : [])]
+        .flatMap((m) => m.parts)
+        .find(
+          (p): p is Extract<ChatPart, { type: "tool" }> =>
+            p.type === "tool" && p.name.endsWith("spawn_session"),
+        );
+      const passed = (spawn?.args as { assistant?: { autoPr?: { enabled?: unknown } } })
+        ?.assistant?.autoPr?.enabled;
+      // Hard: what the model passed is what the child got. Soft: that it passed it.
+      if (passed === true) expect(a.autoPr.enabled).toBe(true);
+      else console.warn("[spawn e2e] model omitted the assistant overlay");
+    } finally {
+      for (const s of manager.list()) manager.remove(s.id);
+    }
+  }, 240_000);
 });
