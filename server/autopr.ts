@@ -43,7 +43,13 @@ import {
   workingDiff,
 } from "./git.js";
 import { suggestBranchName, suggestCommitMessage } from "./llm.js";
-import { runPrSession } from "./prAgent.js";
+import { runPrSession, type RanCommand } from "./prAgent.js";
+
+/** RunContext plus a recording git runner: what the flow changed is replayed
+ * to the PR agent so it can see what already happened. */
+interface FlowContext extends RunContext {
+  run: (args: string[], timeoutMs?: number) => ReturnType<typeof git>;
+}
 
 /** How many commit-message attempts before falling back to a generic subject. */
 const COMMIT_ATTEMPTS = 3;
@@ -104,9 +110,19 @@ export async function runAutoPr(
     return;
   }
 
+  const history: RanCommand[] = [];
+  const flow: FlowContext = {
+    ...ctx,
+    run: async (args, timeoutMs) => {
+      const result = await git(folder, args, timeoutMs);
+      history.push({ args, result });
+      return result;
+    },
+  };
+
   const base = await mainBranch(folder);
   // Best-effort refresh so the base comparison and the later pull are honest.
-  await git(folder, ["fetch", "origin", base], 60_000);
+  await flow.run(["fetch", "origin", base], 60_000);
   const branch = await currentBranch(folder);
   const onMain = branch === base || branch === null;
   const dirty = await isDirty(folder);
@@ -123,19 +139,18 @@ export async function runAutoPr(
   // --- 1. branch -----------------------------------------------------------
   let working = branch;
   if (onMain) {
-    working = await cutBranch(ctx, base, instructions);
+    working = await cutBranch(flow, base, instructions);
     if (!working) return;
   } else if (working) {
-    working = await prefixBranch(ctx, working);
+    working = await prefixBranch(flow, working);
     if (!working) return;
   }
 
   // --- 2. commit -----------------------------------------------------------
-  if (dirty && !(await commitAll(ctx, instructions))) return;
+  if (dirty && !(await commitAll(flow, instructions))) return;
 
   // --- 3. push -------------------------------------------------------------
-  const push = await git(
-    folder,
+  const push = await flow.run(
     ["push", "-u", "origin", working ?? "HEAD"],
     180_000,
   );
@@ -169,6 +184,7 @@ export async function runAutoPr(
       harnessId,
       command,
       instructions,
+      history,
       onSession: (id) => {
         prSession = id;
         note(
@@ -275,7 +291,7 @@ async function mergeWhenReady(ctx: RunContext, target: string, label: string): P
 /** Cut `<prefix>/<slug>` off the current commit, naming it via the LLM with a
  * deterministic fallback. Returns the new branch, or null if checkout failed. */
 async function cutBranch(
-  ctx: RunContext,
+  ctx: FlowContext,
   base: string,
   instructions?: string,
 ): Promise<string | null> {
@@ -286,7 +302,7 @@ async function cutBranch(
   let name = `${prefix}/${slug}`;
   for (let n = 2; await branchExists(folder, name); n++) name = `${prefix}/${slug}-${n}`;
 
-  const checkout = await git(folder, ["checkout", "-b", name]);
+  const checkout = await ctx.run(["checkout", "-b", name]);
   if (!checkout.ok) {
     failed(`Could not create branch ${name}`, checkout);
     return null;
@@ -299,13 +315,13 @@ async function cutBranch(
  * else the push strands an unprefixed remote branch. A branch that already
  * tracks a remote is left alone: its name may carry an open PR. Returns the
  * branch to use, or null if the rename failed. */
-async function prefixBranch(ctx: RunContext, branch: string): Promise<string | null> {
+async function prefixBranch(ctx: FlowContext, branch: string): Promise<string | null> {
   const { folder, note, failed } = ctx;
   const target = prefixedBranch(branch, await branchPrefix(folder));
   if (!target || (await hasUpstream(folder, branch))) return branch;
   let name = target;
   for (let n = 2; await branchExists(folder, name); n++) name = `${target}-${n}`;
-  const rename = await git(folder, ["branch", "-m", branch, name]);
+  const rename = await ctx.run(["branch", "-m", branch, name]);
   if (!rename.ok) {
     failed(`Could not rename ${branch} to ${name}`, rename);
     return null;
@@ -316,11 +332,11 @@ async function prefixBranch(ctx: RunContext, branch: string): Promise<string | n
 
 /** Stage everything and commit it with an LLM-written subject. */
 async function commitAll(
-  ctx: RunContext,
+  ctx: FlowContext,
   instructions?: string,
 ): Promise<boolean> {
   const { folder, note, failed } = ctx;
-  const add = await git(folder, ["add", "-A"]);
+  const add = await ctx.run(["add", "-A"]);
   if (!add.ok) {
     failed("Could not stage the changes", add);
     return false;
@@ -340,7 +356,7 @@ async function commitAll(
   }
   // Signing is interactive (git-helper primes a YubiKey touch for exactly
   // this); headless it would hang forever.
-  const commit = await git(folder, [
+  const commit = await ctx.run([
     "-c",
     "commit.gpgsign=false",
     "commit",
