@@ -4,7 +4,13 @@
 // natively (claude: in-process MCP server). Spawns are rate-limited globally.
 import type { SessionManager } from "./sessions/manager.js";
 import type { HostTool, HostToolParam, HostToolSet } from "./adapters/types.js";
-import type { AssistantSettings, ChatState, SessionInfo } from "../shared/protocol.js";
+import type {
+  AssistantSettings,
+  ChatAction,
+  ChatState,
+  ChatUiRequest,
+  SessionInfo,
+} from "../shared/protocol.js";
 import { emptyChatState } from "../shared/chat.js";
 import { normalizeFolder } from "./paths.js";
 import { messageText } from "./suggestions.js";
@@ -73,6 +79,69 @@ export function lastReply(state: ChatState | undefined): string {
   return text.length > REPLY_MAX_CHARS
     ? `…${text.slice(-REPLY_MAX_CHARS)}`
     : text;
+}
+
+/** Card kinds a spawning session may answer. Permission (`select`/`confirm`) and
+ * `plan` cards stay with the user — answering them would grant the child what
+ * `overlayAssistant` refuses to (same split as assistant.ts's capabilities). */
+const ANSWERABLE: ReadonlySet<ChatUiRequest["kind"]> = new Set(["questions", "input"]);
+const TOOL_ARGS_MAX_CHARS = 2_000;
+
+/** A pending card as the caller sees it: enough to answer it with answer_session. */
+export function describeRequest(r: ChatUiRequest) {
+  const args = r.tool?.args === undefined ? undefined : JSON.stringify(r.tool.args);
+  return {
+    requestId: r.id,
+    kind: r.kind,
+    title: r.title,
+    answerable: ANSWERABLE.has(r.kind),
+    ...(r.message ? { message: r.message } : {}),
+    ...(r.placeholder ? { placeholder: r.placeholder } : {}),
+    ...(r.questions?.length
+      ? {
+          questions: r.questions.map((q) => ({
+            question: q.question,
+            ...(q.multiSelect ? { multiSelect: true } : {}),
+            options: q.options.map((o) => o.label),
+          })),
+        }
+      : {}),
+    ...(r.options?.length ? { options: r.options.map((o) => o.label) } : {}),
+    ...(r.tool
+      ? {
+          tool: r.tool.name,
+          ...(args
+            ? { toolArgs: args.length > TOOL_ARGS_MAX_CHARS ? `${args.slice(0, TOOL_ARGS_MAX_CHARS)}…` : args }
+            : {}),
+        }
+      : {}),
+  };
+}
+
+/** The `ui-response` answering `r` from answer_session's args, or throws. */
+export function answerAction(
+  r: ChatUiRequest,
+  args: { answers?: unknown; text?: unknown },
+): Extract<ChatAction, { type: "ui-response" }> {
+  if (!ANSWERABLE.has(r.kind))
+    throw new Error(`A ${r.kind} card (${r.title}) needs the user; it can't be answered by another session`);
+  if (r.kind === "input") {
+    if (typeof args.text !== "string") throw new Error("This card takes `text`");
+    return { type: "ui-response", requestId: r.id, value: args.text };
+  }
+  const qs = r.questions ?? [];
+  if (!isObj(args.answers)) throw new Error("This card takes `answers` (question text → answer)");
+  const given = args.answers;
+  const unknown = Object.keys(given).filter((k) => !qs.some((q) => q.question === k));
+  if (unknown.length) throw new Error(`Unknown question(s): ${unknown.join("; ")}`);
+  const answers: Record<string, string> = {};
+  for (const q of qs) {
+    const a = given[q.question];
+    // Free text is allowed, like the card's "Other" field.
+    if (typeof a !== "string" || !a.trim()) throw new Error(`Missing answer for: ${q.question}`);
+    answers[q.question] = a.trim();
+  }
+  return { type: "ui-response", requestId: r.id, answers };
 }
 
 export function clampWaitSec(v: unknown): number {
@@ -188,7 +257,7 @@ export function attachSessionTools(
         ? { reply: lastReply(state) }
         : {}),
       ...(status === "waiting-for-input"
-        ? { pending: state?.pendingRequests.map((r) => r.title) }
+        ? { pending: state?.pendingRequests.map(describeRequest) }
         : {}),
     };
   };
@@ -307,7 +376,7 @@ export function attachSessionTools(
     {
       name: "wait_session",
       description:
-        "Wait (bounded) for a session you spawned to finish its turn, including any AI-assistant work that follows it (auto-PR, continuity, auto-answered cards). Returns status running (timed out — call again; `assistant` names AI-assistant work still in flight), idle (with its reply), waiting-for-input (a permission/question card awaits the user), or exited.",
+        "Wait (bounded) for a session you spawned to finish its turn, including any AI-assistant work that follows it (auto-PR, continuity, auto-answered cards). Returns status running (timed out — call again; `assistant` names AI-assistant work still in flight), idle (with its reply), waiting-for-input (`pending` lists the cards; answer `answerable` ones with answer_session, then wait again), or exited.",
       readOnly: true,
       params: {
         sessionId: { type: "string", description: "Id from spawn_session." },
@@ -322,6 +391,40 @@ export function attachSessionTools(
         own(caller, id);
         await settle(id, clampWaitSec(args.timeoutSec));
         return JSON.stringify(report(id));
+      },
+    },
+    {
+      name: "answer_session",
+      description:
+        "Answer a question card (kind questions or input) that a session you spawned is waiting on, as reported by wait_session's `pending`. The session then resumes; call wait_session again for its reply or its next question. Permission and plan cards (answerable:false) need the user.",
+      params: {
+        sessionId: { type: "string", description: "Id from spawn_session." },
+        requestId: {
+          type: "string",
+          optional: true,
+          description: "Card to answer (from `pending`). Defaults to the oldest pending card.",
+        },
+        answers: {
+          type: "object",
+          optional: true,
+          description:
+            "For a questions card: question text → answer. Answer with an option label (multiSelect: labels joined with \", \") or free text. Every question must be answered.",
+          values: { type: "string", description: "Answer." },
+        },
+        text: { type: "string", optional: true, description: "For an input card: the reply." },
+      },
+      async run(args) {
+        const id = str(args.sessionId);
+        own(caller, id);
+        const pending = manager.chatState(id)?.pendingRequests ?? [];
+        const rid = str(args.requestId);
+        const req = rid ? pending.find((r) => r.id === rid) : pending[0];
+        if (!req)
+          throw new Error(rid ? `No pending card ${rid} (already answered?)` : "Session has no pending card");
+        if (manager.assistantWork(id).length)
+          throw new Error("The session's AI assistant is handling this card; wait_session again");
+        manager.chatAction(id, answerAction(req, args));
+        return JSON.stringify({ sessionId: id, answered: req.id, status: "running" });
       },
     },
     {

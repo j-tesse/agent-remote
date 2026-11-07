@@ -33,6 +33,8 @@ export interface HostToolParam {
   enum?: string[];
   /** Fields of an `object` param. */
   properties?: Record<string, HostToolParam>;
+  /** `object` with free keys instead of `properties` (a map, e.g. question → answer). */
+  values?: HostToolParam;
 }
 
 export interface HostTool {
