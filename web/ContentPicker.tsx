@@ -205,7 +205,12 @@ export function ContentPicker({
             className="cocreate-type"
             aria-label="Content type"
             value={mediaType}
-            onChange={(e) => setMediaType(e.target.value as ContentMediaType)}
+            onChange={(e) => {
+              const next = e.target.value as ContentMediaType;
+              // An untouched default name follows the type; a typed path is kept.
+              if (!text.trim() || text === type.defaultName) setText(CONTENT_TYPES[next].defaultName);
+              setMediaType(next);
+            }}
           >
             {Object.entries(CONTENT_TYPES).map(([id, t]) => (
               <option key={id} value={id}>

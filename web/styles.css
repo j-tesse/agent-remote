@@ -4096,6 +4096,101 @@ button.auto-press::after {
   background: var(--raised);
 }
 
+/* Learn page: a sandboxed iframe filling the body (PhoneFrame may wrap it). */
+.cocreate-preview-body.cocreate-learn-body {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+}
+.cocreate-learn-fill {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.cocreate-learn-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: var(--panel);
+}
+
+/* Learn page: phone frame */
+.learn-phone-device,
+.learn-phone-screen {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.learn-phone.on {
+  --phone-bezel: 10px;
+  --phone-radius: calc(var(--r-lg) * 3);
+  padding: 24px;
+  align-items: center;
+  justify-content: center;
+  /* cq units below resolve against this padded stage's content box. */
+  container-type: size;
+}
+.learn-phone.on .learn-phone-device {
+  flex: none;
+  position: relative;
+  box-sizing: border-box;
+  /* Largest fit: width-bound, or height-bound (screen height minus bezels, at 9:19.5). */
+  width: min(100cqw, (100cqh - 2 * var(--phone-bezel)) * 9 / 19.5 + 2 * var(--phone-bezel));
+  padding: var(--phone-bezel);
+  border-radius: var(--phone-radius);
+  background: var(--raised);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent),
+    0 18px 48px rgba(0, 0, 0, 0.35),
+    0 4px 12px rgba(0, 0, 0, 0.2);
+}
+/* Camera dot, sitting in the top bezel so it never covers page content. */
+.learn-phone.on .learn-phone-device::before {
+  content: "";
+  position: absolute;
+  top: calc(var(--phone-bezel) / 2 - 2px);
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.6;
+}
+.learn-phone.on .learn-phone-screen {
+  flex: none;
+  width: 100%;
+  aspect-ratio: 9 / 19.5;
+  overflow: hidden;
+  /* Concentric with the device corner. */
+  border-radius: calc(var(--phone-radius) - var(--phone-bezel));
+  background: var(--panel);
+}
+@media (max-width: 640px) {
+  /* Already on a phone: always fill. */
+  .learn-phone.on {
+    padding: 0;
+    align-items: stretch;
+    container-type: normal;
+  }
+  .learn-phone.on .learn-phone-device,
+  .learn-phone.on .learn-phone-screen {
+    flex: 1;
+    width: auto;
+    padding: 0;
+    aspect-ratio: auto;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .learn-phone.on .learn-phone-device::before {
+    display: none;
+  }
+}
+
 /* Picker extras: agent chips + media type, above the path field. */
 .cocreate-picker-opts {
   display: flex;

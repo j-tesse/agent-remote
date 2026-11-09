@@ -1,7 +1,7 @@
 // Co-create media-type registry: what a content pane can show and how the agent
 // is told about it. Harness-agnostic — adapters only ever see the framing text.
 
-export type ContentMediaType = "markdown";
+export type ContentMediaType = "markdown" | "learn";
 
 /** What a co-create session's right pane shows: a media type + a path relative
  * to the session folder (a file, or a folder for folder-kind types). */
@@ -20,6 +20,12 @@ export interface ContentType {
   instructions(path: string): string;
 }
 
+/** Where a learn page's kit lives, relative to the session folder. */
+export function learnKitDir(path: string): string {
+  const dir = path.split("/").slice(0, -1).join("/");
+  return dir ? `${dir}/learnkit` : "learnkit";
+}
+
 export const CONTENT_TYPES: Record<ContentMediaType, ContentType> = {
   markdown: {
     label: "Markdown",
@@ -35,6 +41,32 @@ export const CONTENT_TYPES: Record<ContentMediaType, ContentType> = {
         "Keep chat replies brief — the document is the deliverable. Never paste the document (or large parts of it) into chat; summarize what you changed instead.",
         "You may read other files in the working directory for context.",
       ].join("\n"),
+  },
+  learn: {
+    label: "Mobile learning",
+    pointer: "file",
+    extensions: [".html", ".htm"],
+    defaultName: "lesson.html",
+    instructions: (path) => {
+      const kit = learnKitDir(path);
+      return [
+        "# Co-create mode: mobile learning page",
+        `You are co-creating \`${path}\` (relative to the working directory) with the user: ONE self-contained HTML page, read on a phone by scrolling top to bottom, that explains a topic visually.`,
+        "The user sees it rendered live beside this chat and cannot edit it: every change they ask for must be made by you, editing that file with your file tools. Unless they say otherwise, requests refer to this page.",
+        "Keep chat replies brief — the page is the deliverable. Never paste it into chat; summarize what you changed.",
+        "",
+        "## Kit",
+        `\`${kit}/\` holds learnkit (kit.css + kit.js): ready-made layout, scroll reveals, scrollytelling, SVG line drawing, counters, steppers, sliders, quizzes, tap-to-reveal. Read \`${kit}/README.md\` before your first edit and use the kit instead of writing your own versions.`,
+        `Never edit \`${kit}/\`. Page-specific styles/scripts go in the page's own <style>/<script>. No CDNs or network requests; images/SVG files go beside the page and are referenced relatively. Prefer inline SVG for diagrams.`,
+        "",
+        "## Approach",
+        "- Arc: hook (a question or surprising fact) → intuition → build up one step at a time → worked example → check yourself (quiz) → recap.",
+        "- One idea per screen. Visual first, words second; at most ~3 short sentences per block. Define a term before using it.",
+        "- Animate to explain (show change, cause, sequence), never to decorate. Every animation must also make sense as its end state (reduced motion).",
+        "- Design for a 360–430px portrait screen: single column, no horizontal scroll, text ≥16px, tap targets ≥44px, nothing hover-only. Diagrams must stay legible at that width (big labels, few elements).",
+        "- Build incrementally: get the arc in place first, then enrich screens with visuals and interactions.",
+      ].join("\n");
+    },
   },
 };
 
