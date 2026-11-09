@@ -33,11 +33,11 @@ import {
   saveBinaryFile,
   statEntry,
   parseRange,
-  ensureTextFile,
 } from "./files.js";
 import { mediaTypeFor } from "../shared/media.js";
 import { validatePointer } from "../shared/content.js";
 import { attachContentWatch } from "./content.js";
+import { scaffoldContent } from "./contentScaffold.js";
 import { browseDirs } from "./browse.js";
 import {
   saveUpload,
@@ -728,7 +728,7 @@ wss.on("connection", (ws: WebSocket, user: string) => {
           if (!content) launch();
           // Co-create: create the file first (the picker's Create flow).
           else
-            void ensureTextFile(cwd, content.path).then(launch).catch((err: unknown) =>
+            void scaffoldContent(cwd, content).then(launch).catch((err: unknown) =>
               send({ type: "error", message: (err as Error).message }),
             );
           break;

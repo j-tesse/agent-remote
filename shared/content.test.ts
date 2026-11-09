@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { CONTENT_TYPES, matchesType, resolveContentLink, validatePointer } from "./content";
+import {
+  CONTENT_TYPES,
+  learnKitDir,
+  matchesType,
+  resolveContentLink,
+  validatePointer,
+} from "./content";
 
 describe("validatePointer", () => {
   it("accepts and normalizes a relative markdown path", () => {
@@ -24,6 +30,23 @@ describe("validatePointer", () => {
   it("requires a matching extension with a name in front", () => {
     expect(validatePointer({ mediaType: "markdown", path: "notes.txt" })).toBeNull();
     expect(validatePointer({ mediaType: "markdown", path: "docs/.md" })).toBeNull();
+  });
+});
+
+describe("learn pointers", () => {
+  it("accepts html pages and rejects other extensions", () => {
+    expect(validatePointer({ mediaType: "learn", path: "./l/intro.HTML" })?.path).toBe("l/intro.HTML");
+    expect(validatePointer({ mediaType: "learn", path: "x.htm" })?.path).toBe("x.htm");
+    expect(validatePointer({ mediaType: "learn", path: "x.md" })).toBeNull();
+    expect(validatePointer({ mediaType: "learn", path: "../x.html" })).toBeNull();
+  });
+
+  it("puts the kit beside the page and points the agent at its README", () => {
+    expect(learnKitDir("lesson.html")).toBe("learnkit");
+    expect(learnKitDir("a/b/lesson.html")).toBe("a/b/learnkit");
+    const text = CONTENT_TYPES.learn.instructions("a/lesson.html");
+    expect(text).toContain("`a/lesson.html`");
+    expect(text).toContain("`a/learnkit/README.md`");
   });
 });
 

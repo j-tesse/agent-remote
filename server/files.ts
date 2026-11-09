@@ -79,9 +79,9 @@ export async function writeTextFile(
 }
 
 /** Make sure a text file exists under `root` (co-create's Create flow): creates
- * parent dirs + an empty file if missing, never touches an existing one.
+ * parent dirs + the file (empty, or `content`) if missing, never touches an existing one.
  * Returns whether it was created. */
-export async function ensureTextFile(root: string, rel: string): Promise<boolean> {
+export async function ensureTextFile(root: string, rel: string, content = ""): Promise<boolean> {
   const file = resolveWithin(root, rel);
   if (file === resolve(root)) throw new Error("Path is the folder itself.");
   try {
@@ -92,7 +92,7 @@ export async function ensureTextFile(root: string, rel: string): Promise<boolean
   }
   await mkdir(dirname(file), { recursive: true });
   try {
-    await fsWriteFile(file, "", { flag: "wx" });
+    await fsWriteFile(file, content, { flag: "wx" });
     return true;
   } catch (err) {
     // Lost a race to another creator: it exists now, which is all we wanted.
