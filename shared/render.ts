@@ -316,8 +316,22 @@ function diffBody(
   return { kind: "diff", path, rows, ...diffStats(hunks.flat()) };
 }
 
+const trimSlash = (p: string): string => p.replace(/\/+$/, "") || "/";
+
+/** Drop a leading `cd <cwd> &&`/`;` — agents prefix it out of habit, and it says
+ * nothing when it's the session's own folder. Any other target stays: it matters. */
+export function stripCwdCd(command: string, cwd?: string): string {
+  if (!cwd) return command;
+  const m = /^\s*cd\s+(?:"([^"]*)"|'([^']*)'|([^\s;&|"']+))\s*(?:&&|;)\s*/.exec(command);
+  if (!m) return command;
+  const target = m[1] ?? m[2] ?? m[3];
+  const rest = command.slice(m[0].length);
+  return rest.trim() && trimSlash(target) === trimSlash(cwd) ? rest : command;
+}
+
 export function toolView(
   part: Extract<ChatPart, { type: "tool" }>,
+  cwd?: string,
 ): ToolView {
   const a = (part.args ?? {}) as Record<string, unknown>;
   const str = (v: unknown): string | undefined =>
@@ -325,7 +339,8 @@ export function toolView(
   const num = (v: unknown): number | undefined =>
     typeof v === "number" ? v : undefined;
   const filePath = str(a.file_path) ?? str(a.path);
-  const command = str(a.command);
+  const rawCommand = str(a.command);
+  const command = rawCommand === undefined ? undefined : stripCwdCd(rawCommand, cwd);
   const description = str(a.description);
   const content = str(a.content);
   const offset = num(a.offset);
@@ -635,6 +650,7 @@ export function renderPart(
   part: ChatPart,
   standalone = false,
   agents?: Record<string, AgentRun>,
+  cwd?: string,
 ): RenderedPart {
   switch (part.type) {
     case "text":
@@ -681,7 +697,7 @@ export function renderPart(
       };
     case "tool": {
       const glyph = toolGlyph(part.status);
-      const view = toolView(part);
+      const view = toolView(part, cwd);
       const summary =
         `<summary><span class="chat-tool-glyph">${glyph}</span>` +
         `<span class="chat-tool-name">${escapeHtml(part.name)}</span>` +
@@ -708,7 +724,7 @@ export function renderPart(
       const run = agents?.[part.toolId];
       const nested = run && (run.loading || run.state.messages.length > 0);
       const inner = nested
-        ? renderAgentPanel(run, agents ?? {}, agentPrompt(part))
+        ? renderAgentPanel(run, agents ?? {}, agentPrompt(part), cwd)
         : renderToolBody(view.body) +
           (part.output
             ? `<pre class="chat-tool-output">${escapeHtml(part.output)}</pre>`
@@ -757,6 +773,7 @@ function renderAgentPanel(
   run: AgentRun,
   agents: Record<string, AgentRun>,
   prompt = "",
+  cwd?: string,
 ): string {
   if (run.state.messages.length === 0)
     return `<div class="chat-agent empty">Loading transcript…</div>`;
@@ -765,7 +782,7 @@ function renderAgentPanel(
     : "";
   const turns = run.state.messages
     .map((m) => {
-      const rendered = renderMessage(m, agents);
+      const rendered = renderMessage(m, agents, cwd);
       if (m.role === "system") return rendered.html; // already a standalone line
       return m.role === "user"
         ? `<div class="chat-turn user"><div class="chat-bubble user">${rendered.html}</div></div>`
@@ -778,6 +795,8 @@ function renderAgentPanel(
 export function renderMessage(
   message: ChatMessage,
   agents?: Record<string, AgentRun>,
+  /** Session folder: a leading `cd` into it is hidden (see stripCwdCd). */
+  cwd?: string,
 ): RenderedMessage {
   // Neither party authored this one (a background-task notification, a peer
   // message). Muted single line in transcript order — it explains the reply that
@@ -826,7 +845,7 @@ export function renderMessage(
   const html = groupParts(message.parts)
     .map((g) => {
       if (g.kind === "tool") {
-        const rendered = renderPart(g.part, true, agents);
+        const rendered = renderPart(g.part, true, agents, cwd);
         parts.push(rendered);
         return rendered.html;
       }

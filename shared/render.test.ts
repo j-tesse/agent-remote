@@ -12,6 +12,7 @@ import {
   renderMessage,
   renderPart,
   shortenPath,
+  stripCwdCd,
   thoughtAmount,
   thinkingSummary,
   toolView,
@@ -32,6 +33,33 @@ describe("shortenPath", () => {
     expect(shortenPath("file.ts")).toBe("file.ts");
     expect(shortenPath("dir/file.ts")).toBe("dir/file.ts");
     expect(shortenPath("/a/b/c/d/file.ts")).toBe("…/d/file.ts");
+  });
+});
+
+describe("stripCwdCd", () => {
+  const cwd = "/home/u/proj/";
+  it("drops a leading cd into the session folder", () => {
+    expect(stripCwdCd("cd /home/u/proj && npm test", cwd)).toBe("npm test");
+    expect(stripCwdCd("cd /home/u/proj; git status", cwd)).toBe("git status");
+    expect(stripCwdCd('cd "/home/u/proj/" && ls', cwd)).toBe("ls");
+    expect(stripCwdCd("  cd '/home/u/proj'&&ls -la", cwd)).toBe("ls -la");
+  });
+  it("keeps a cd anywhere else, a bare cd, or with no folder known", () => {
+    for (const c of [
+      "cd /home/u/proj/sub && ls",
+      "cd sub && ls",
+      "cd /home/u/proj",
+      "cd /home/u/proj && ",
+      "cd /home/u/proj || exit",
+      "echo cd /home/u/proj && ls",
+    ])
+      expect(stripCwdCd(c, cwd)).toBe(c);
+    expect(stripCwdCd("cd /x && ls", undefined)).toBe("cd /x && ls");
+  });
+  it("applies to the tool view's subject and body", () => {
+    const v = toolView(toolPart({ command: "cd /home/u/proj && make" }), cwd);
+    expect(v.primary).toBe("make");
+    expect(v.body).toEqual({ kind: "code", text: "make" });
   });
 });
 

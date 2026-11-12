@@ -165,6 +165,7 @@ manager.subscribe({
         recordChatRenders(sessionId, state, {
           harnessId: info?.harnessId,
           cwd: info?.cwd,
+          folder: info?.folder,
         });
     }
     if (event.type !== "user-message") return;
