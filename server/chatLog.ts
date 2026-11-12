@@ -16,7 +16,7 @@ const logged = new Map<string, Map<string, string>>();
 export function recordChatRenders(
   sessionId: string,
   state: ChatState,
-  meta: { harnessId?: string; cwd?: string } = {},
+  meta: { harnessId?: string; cwd?: string; folder?: string } = {},
 ): void {
   let seen = logged.get(sessionId);
   if (!seen) logged.set(sessionId, (seen = new Map()));
@@ -35,7 +35,7 @@ export function recordChatRenders(
       harnessId: meta.harnessId ?? null,
       cwd: meta.cwd ?? null,
       original,
-      rendered: JSON.stringify(renderMessage(message, state.agents)),
+      rendered: JSON.stringify(renderMessage(message, state.agents, meta.folder)),
     });
   }
 }

@@ -1281,6 +1281,7 @@ function Workspace({
                           key={s.id}
                           client={client}
                           sessionId={s.id}
+                          folder={s.folder}
                           active={active}
                           exited={s.status === "exited"}
                           canResume={

@@ -114,6 +114,8 @@ const AgentsContext = createContext<{
   held: ReadonlySet<string>;
   known: ReadonlySet<string>;
   onOpenSession: (id: string) => void;
+  /** Session folder, for stripCwdCd. */
+  cwd?: string;
 }>({
   agents: {},
   onLoad: () => {},
@@ -235,9 +237,9 @@ function ToolPart({
   standalone?: boolean;
 }) {
   const glyph = toolGlyph(part.status);
-  const view = toolView(part);
-  const { agents, onLoad, client, held, known, onOpenSession } =
+  const { agents, onLoad, client, held, known, onOpenSession, cwd } =
     useContext(AgentsContext);
+  const view = toolView(part, cwd);
   const run = agents[part.toolId];
   // An empty run keeps the ordinary tool view — see renderPart.
   const nested = run && (run.loading || run.state.messages.length > 0);
@@ -1632,9 +1634,12 @@ export function ChatView({
   knownSessions,
   heldSessions,
   onOpenSession,
+  folder,
 }: {
   client: Client;
   sessionId: string;
+  /** Launch folder; a leading `cd` into it is hidden in tool calls. */
+  folder?: string;
   active: boolean;
   exited: boolean;
   // Every session id currently listed, and the jump-to-tab action. An AI-mode
@@ -2213,8 +2218,9 @@ export function ChatView({
       held: heldSessions,
       known: knownSessions,
       onOpenSession,
+      cwd: folder,
     }),
-    [state.agents, client, sessionId, heldSessions, knownSessions, onOpenSession],
+    [state.agents, client, sessionId, heldSessions, knownSessions, onOpenSession, folder],
   );
 
   return (
