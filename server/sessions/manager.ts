@@ -30,6 +30,7 @@ import {
   isEmptyChat,
 } from "../../shared/chat.js";
 import { normalizeFolder } from "../paths.js";
+import { SudoPromptTracker } from "./sudoPrompt.js";
 import { CONTENT_TYPES, type ContentPointer } from "../../shared/content.js";
 
 /** `start()` options: the adapter's own, plus manager-level flags adapters never see a use for. */
@@ -61,6 +62,7 @@ interface Session {
   /** Present only for harnesses with shell integration; extracts events and
    * strips the integration markers from the output stream. */
   parser?: SessionEventParser;
+  sudo?: SudoPromptTracker;
   // --- chat flavor (ui: "chat") ---
   /** Translator-based chat (manager owns the piped child), e.g. pi. */
   child?: ChildProcessWithoutNullStreams;
@@ -330,6 +332,7 @@ export class SessionManager {
       buffer: "",
       parser: adapter.createEventParser?.(),
     };
+    if (session.parser) session.sudo = new SudoPromptTracker();
 
     child.onData((data) => {
       // The parser strips integration markers and yields events; without one,
@@ -340,8 +343,17 @@ export class SessionManager {
       if (output) {
         session.buffer = (session.buffer + output).slice(-MAX_BUFFER);
         for (const l of this.listeners) l.onOutput(info.id, output);
+        // Output before events: a chunk's text precedes its trailing sudo marker.
+        this.sudoDone(session, session.sudo?.output(output));
       }
-      for (const event of events) {
+      for (let event of events) {
+        if (event.type === "sudo-prompt") {
+          const p = session.sudo?.prompt(randomUUID(), info.currentCommand !== null);
+          if (!p) continue;
+          info.sudoPrompt = p;
+          event = { ...event, ...p };
+        } else if (event.type === "command-start" || event.type === "command-end")
+          this.sudoDone(session, session.sudo?.boundary());
         // Reflect live state: cwd + the running command (set on exec, cleared at prompt).
         // `cwd` drifts with `cd` and never re-parents the session (that's
         // `info.folder`); normalized so it compares against folder keys, which
@@ -354,6 +366,7 @@ export class SessionManager {
       }
     });
     child.onExit(({ exitCode }) => {
+      this.sudoDone(session, session.sudo?.input());
       info.status = "exited";
       info.exitCode = exitCode;
       for (const l of this.listeners) l.onExit(info.id, exitCode);
@@ -571,7 +584,28 @@ export class SessionManager {
   }
 
   input(sessionId: string, data: string): void {
-    this.sessions.get(sessionId)?.pty?.write(data);
+    const session = this.sessions.get(sessionId);
+    if (!session?.pty) return;
+    this.sudoDone(session, session.sudo?.input());
+    session.pty.write(data);
+  }
+
+  /** Type a secret into a still-pending sudo prompt. Bypasses `input()`, which
+   * would clear the prompt first. False if the prompt is gone/superseded. */
+  fillSudo(sessionId: string, promptId: string, password: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session?.pty || session.info.status === "exited") return false;
+    if (!session.sudo?.fill(promptId)) return false;
+    session.pty.write(password + "\r");
+    this.sudoDone(session, promptId);
+    return true;
+  }
+
+  private sudoDone(session: Session, id: string | null | undefined): void {
+    if (!id) return;
+    delete session.info.sudoPrompt;
+    const event: SessionEvent = { type: "sudo-prompt-done", id, at: Date.now() };
+    for (const l of this.listeners) l.onEvent?.(session.info.id, event);
   }
 
   resize(sessionId: string, cols: number, rows: number): void {

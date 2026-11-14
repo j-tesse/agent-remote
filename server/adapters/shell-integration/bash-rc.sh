@@ -52,6 +52,9 @@ if [ -z "$AGENT_REMOTE_SHELL_INTEGRATION" ]; then
     fi
   }
 
+  # Trailing OSC 633;S marks a *local* sudo password prompt (env doesn't cross
+  # ssh); kept last so no visible prompt text follows it. User's prompt kept.
+  export SUDO_PROMPT="${SUDO_PROMPT:-[sudo] password for %p: }"$'\033]633;S\007'
   trap '__agent_remote_preexec' DEBUG
   PROMPT_COMMAND="__agent_remote_precmd${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
   __agent_remote_osc "P;Cwd=$PWD"

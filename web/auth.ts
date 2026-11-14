@@ -57,3 +57,18 @@ export function changePassword(
 ): Promise<AuthResult> {
   return postAuth("/api/change-password", { current, next });
 }
+
+// Stored sudo password: write-only, the server only ever says whether it's set.
+async function sudoRequest(method: string, body?: object): Promise<AuthResult & { set?: boolean }> {
+  const res = await fetch("/api/sudo-password", {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, message: data.message, set: data.set === true };
+}
+
+export const fetchSudoStatus = () => sudoRequest("GET");
+export const saveSudoPassword = (password: string) => sudoRequest("PUT", { password });
+export const clearSudoPassword = () => sudoRequest("DELETE");

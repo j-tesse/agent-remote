@@ -174,6 +174,81 @@ body {
   flex-direction: column;
 }
 
+.settings-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-actions .login-submit {
+  flex: 1;
+}
+
+.settings-actions .settings-logout {
+  margin-top: 8px;
+}
+
+/* --- sudo password prompt (over a terminal) --- */
+
+.sudo-dialog {
+  max-width: 420px;
+}
+
+.sudo-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 0;
+  font-size: 13px;
+}
+
+.sudo-dialog-body p {
+  margin: 0;
+}
+
+.sudo-dialog-command {
+  padding: 6px 8px;
+  background: var(--raised);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sudo-dialog-note {
+  color: var(--muted);
+}
+
+.sudo-dialog-link {
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.sudo-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 4px 14px 14px;
+}
+
+.sudo-dialog-actions .settings-logout {
+  margin-top: 8px;
+}
+
+.sudo-dialog-actions .login-submit {
+  min-width: 96px;
+}
+
 /* --- login / register gate ----------------------------------------------- */
 
 .login {

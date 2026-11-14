@@ -46,6 +46,13 @@ import {
   MAX_IMAGE_BYTES,
 } from "./uploads.js";
 import { authedUser, handleAuthRoute } from "./auth.js";
+import {
+  clearSudoPassword,
+  hasSudoPassword,
+  loadSudoPassword,
+  storeSudoPassword,
+  sudoPasswordError,
+} from "./sudo.js";
 import { normalizeFolder } from "./paths.js";
 import { startLlmPolling, llmStatus } from "./llm.js";
 import {
@@ -304,6 +311,28 @@ function routeAfterAuth(req: IncomingMessage, res: ServerResponse): void {
           sendJson(res, { ok: true });
         })
         .catch(() => sendJsonError(res, 400, "Bad view."));
+      return;
+    }
+  }
+  // Stored sudo password: write-only — GET says only whether one is set.
+  if (url === "/api/sudo-password") {
+    const user = authedUser(req, config);
+    if (!user) return sendUnauthorized(res);
+    if (req.method === "GET") return sendJson(res, { set: hasSudoPassword(user) });
+    if (req.method === "DELETE") {
+      clearSudoPassword(user);
+      return sendJson(res, { set: false });
+    }
+    if (req.method === "PUT") {
+      readTextBody(req)
+        .then((body) => {
+          const password = (JSON.parse(body) as { password?: unknown }).password;
+          const error = sudoPasswordError(password);
+          if (error) return sendJsonError(res, 400, error);
+          storeSudoPassword(user, password as string);
+          sendJson(res, { set: true });
+        })
+        .catch(() => sendJsonError(res, 400, "Bad request."));
       return;
     }
   }
@@ -744,6 +773,15 @@ wss.on("connection", (ws: WebSocket, user: string) => {
         case "resize":
           manager.resize(msg.sessionId, msg.cols, msg.rows);
           break;
+        case "sudoFill": {
+          // Plaintext goes straight to the PTY; it never touches the wire.
+          const password = loadSudoPassword(user);
+          if (!password)
+            send({ type: "error", message: "No sudo password stored — set one in Settings.", sessionId: msg.sessionId });
+          else if (!manager.fillSudo(msg.sessionId, msg.promptId, password))
+            send({ type: "error", message: "That sudo prompt is no longer waiting.", sessionId: msg.sessionId });
+          break;
+        }
         case "chatAction": {
           const { sessionId, action } = msg;
           // Resolve any attached image refs to base64 here (harness-agnostic),

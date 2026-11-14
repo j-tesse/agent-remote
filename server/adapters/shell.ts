@@ -89,7 +89,7 @@ function partialPrefixLen(tail: string, prefix: string): number {
   return 0;
 }
 
-class ShellEventParser implements SessionEventParser {
+export class ShellEventParser implements SessionEventParser {
   private buf = "";
   private pendingCommand: string | undefined;
 
@@ -160,6 +160,9 @@ class ShellEventParser implements SessionEventParser {
         });
         break;
       }
+      case "S":
+        events.push({ type: "sudo-prompt", id: "", retry: false, at: Date.now() });
+        break;
       case "P":
         if (rest.startsWith("Cwd="))
           events.push({ type: "cwd", cwd: rest.slice(4), at: Date.now() });

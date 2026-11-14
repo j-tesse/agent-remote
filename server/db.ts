@@ -121,6 +121,15 @@ db.exec(
    )`,
 );
 
+// Per-user sudo password, AES-GCM sealed (`secrets.ts`); key lives outside the DB.
+db.exec(
+  `CREATE TABLE IF NOT EXISTS sudo_passwords (
+     owner TEXT PRIMARY KEY,
+     sealed TEXT NOT NULL,
+     updated_at INTEGER NOT NULL
+   )`,
+);
+
 // LLM model display names, keyed by a hash of the whole catalog (+ prompt
 // version) — names depend on the catalog, so any change is a miss. Few rows.
 db.exec(
@@ -622,4 +631,25 @@ export function closeDb(): void {
   } finally {
     db.close();
   }
+}
+
+// --- sudo password (sealed) ------------------------------------------------
+
+const getSudoStmt = db.prepare("SELECT sealed FROM sudo_passwords WHERE owner = ?");
+const setSudoStmt = db.prepare(
+  `INSERT INTO sudo_passwords (owner, sealed, updated_at) VALUES (?, ?, ?)
+   ON CONFLICT(owner) DO UPDATE SET sealed = excluded.sealed, updated_at = excluded.updated_at`,
+);
+const deleteSudoStmt = db.prepare("DELETE FROM sudo_passwords WHERE owner = ?");
+
+export function getSealedSudoPassword(owner: string): string | null {
+  return (getSudoStmt.get(owner) as { sealed: string } | undefined)?.sealed ?? null;
+}
+
+export function setSealedSudoPassword(owner: string, sealed: string): void {
+  setSudoStmt.run(owner, sealed, Date.now());
+}
+
+export function deleteSudoPassword(owner: string): void {
+  deleteSudoStmt.run(owner);
 }

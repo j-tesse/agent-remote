@@ -52,6 +52,14 @@ export interface SessionInfo {
    * prompt. Kept live by shell integration; always null for harnesses without
    * it (and while at the shell prompt). */
   currentCommand: string | null;
+  /** Terminal session sitting at a local sudo password prompt (shell integration). */
+  sudoPrompt?: SudoPrompt;
+}
+
+/** A pending sudo password prompt. `retry`: a fill already failed this command. */
+export interface SudoPrompt {
+  id: string;
+  retry: boolean;
 }
 
 /** A working directory the user has launched sessions in, remembered across
@@ -448,7 +456,10 @@ export interface CommandResolveResult {
 export type SessionEvent =
   | { type: "command-start"; command: string; at: number }
   | { type: "command-end"; exitCode: number; at: number }
-  | { type: "cwd"; cwd: string; at: number };
+  | { type: "cwd"; cwd: string; at: number }
+  /** `id`/`retry` are filled in by the manager; the parser emits it bare. */
+  | { type: "sudo-prompt"; id: string; retry: boolean; at: number }
+  | { type: "sudo-prompt-done"; id: string; at: number };
 
 // ---------------------------------------------------------------------------
 // Chat sessions. Harnesses whose adapter speaks a structured protocol render
@@ -1058,6 +1069,8 @@ export type ClientMessage =
       content?: ContentPointer;
     }
   | { type: "input"; sessionId: string; data: string }
+  /** Type the user's stored sudo password into a pending prompt (server-side). */
+  | { type: "sudoFill"; sessionId: string; promptId: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }
   | { type: "stop"; sessionId: string }
   | { type: "remove"; sessionId: string }

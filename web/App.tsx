@@ -52,6 +52,7 @@ import { FolderPicker } from "./FolderPicker";
 import { Login } from "./Login";
 import { fetchMe, logout } from "./auth";
 import { SettingsButton, SettingsPage } from "./Settings";
+import { SudoPromptDialog } from "./SudoPrompt";
 import { displayPath, folderName } from "./paths";
 import { relativeTime } from "./time";
 
@@ -582,6 +583,17 @@ function Workspace({
       : null;
   const activeSessionObj = sessionsInFolder.find((s) => s.id === activeSessionId);
   const activeExited = activeSessionObj?.status === "exited";
+  // Sudo prompts the user cancelled on this client (they'll type it themselves).
+  const [sudoDismissed, setSudoDismissed] = useState<ReadonlySet<string>>(() => new Set());
+  const sudoPrompt =
+    page === null && !activeExited && activeSessionObj?.ui !== "chat"
+      ? activeSessionObj?.sudoPrompt
+      : undefined;
+  const sudoOpen = !!sudoPrompt && !sudoDismissed.has(sudoPrompt.id);
+  const dismissSudo = useCallback(
+    (id: string) => setSudoDismissed((prev) => new Set(prev).add(id)),
+    [],
+  );
 
   // Jumping to a session named by an AI-mode note (auto-PR's `/pr` tab). Its own
   // launch folder is authoritative — the note's origin is normally in the same
@@ -1266,6 +1278,7 @@ function Workspace({
                     sessionId={s.id}
                     active={s.id === activeSessionId}
                     exited={s.status === "exited"}
+                    blocked={s.id === activeSessionId && sudoOpen}
                     selectMode={s.id === activeSessionId && selectMode}
                     onEnterSelect={() => setSelectMode(true)}
                     onExitSelect={() => setSelectMode(false)}
@@ -1325,6 +1338,19 @@ function Workspace({
                 </Suspense>
               )}
             </div>
+
+            {sudoOpen && sudoPrompt && activeSessionObj && (
+              <SudoPromptDialog
+                prompt={sudoPrompt}
+                command={activeSessionObj.currentCommand}
+                onFill={() => {
+                  client.sudoFill(activeSessionObj.id, sudoPrompt.id);
+                  dismissSudo(sudoPrompt.id);
+                }}
+                onCancel={() => dismissSudo(sudoPrompt.id)}
+                onOpenSettings={() => setPage("settings")}
+              />
+            )}
 
             {/* Exited sessions can't take input: swap the key-bar for a close control. */}
             {activeExited && (
