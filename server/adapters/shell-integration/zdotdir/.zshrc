@@ -31,6 +31,9 @@ if [[ -z "$AGENT_REMOTE_SHELL_INTEGRATION" ]]; then
     __agent_remote_osc "D;$code"
     __agent_remote_osc "P;Cwd=$PWD"
   }
+  # Trailing OSC 633;S marks a *local* sudo password prompt (env doesn't cross
+  # ssh); kept last so no visible prompt text follows it. User's prompt kept.
+  export SUDO_PROMPT="${SUDO_PROMPT:-[sudo] password for %p: }"$'\033]633;S\007'
   add-zsh-hook preexec __agent_remote_preexec
   add-zsh-hook precmd __agent_remote_precmd
   # Report the starting directory immediately so the server doesn't wait for the

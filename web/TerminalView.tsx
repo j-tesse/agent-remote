@@ -136,6 +136,7 @@ export function TerminalView({
   sessionId,
   active,
   exited,
+  blocked = false,
   selectMode,
   onEnterSelect,
   onExitSelect,
@@ -145,6 +146,7 @@ export function TerminalView({
   active: boolean;
   // Process gone: stdin is closed, so keep the terminal unfocusable/untypeable.
   exited: boolean;
+  blocked?: boolean;
   // Touch text-selection. Off: drags scroll. On: drags select. A long-press
   // selects the word under the finger and flips the workspace into select mode.
   selectMode: boolean;
@@ -440,9 +442,11 @@ export function TerminalView({
   }, [client, sessionId]);
 
   // Type immediately on open/switch. After the creation effect so termRef is set.
+  // `blocked`: a dialog (sudo prompt) owns the keyboard; refocus once it's gone.
   useEffect(() => {
-    if (active && !selectMode && !exited) termRef.current?.focus();
-  }, [active, selectMode, exited]);
+    if (blocked) termRef.current?.blur();
+    else if (active && !selectMode && !exited) termRef.current?.focus();
+  }, [active, selectMode, exited, blocked]);
 
   // On exit, take focus away and keep it away: disabling xterm's hidden textarea
   // makes clicks/taps unable to refocus it (and can't raise the mobile keyboard).

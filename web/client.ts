@@ -166,10 +166,18 @@ export class Client {
               ? { currentCommand: ev.command.trim() || null }
               : ev.type === "command-end"
                 ? { currentCommand: null }
-                : null;
+                : ev.type === "sudo-prompt"
+                  ? { sudoPrompt: { id: ev.id, retry: ev.retry } }
+                  : ev.type === "sudo-prompt-done"
+                    ? { sudoPrompt: undefined }
+                    : null;
         if (patch) {
           this.sessions = this.sessions.map((s) =>
-            s.id === msg.sessionId ? { ...s, ...patch } : s,
+            s.id !== msg.sessionId ||
+            // A late "done" for a superseded prompt mustn't clear the new one.
+            (ev.type === "sudo-prompt-done" && s.sudoPrompt?.id !== ev.id)
+              ? s
+              : { ...s, ...patch },
           );
           this.emitSessions();
         }
@@ -222,6 +230,10 @@ export class Client {
     if (this.ctrlMode === mode) return;
     this.ctrlMode = mode;
     for (const cb of this.ctrlListeners) cb(mode);
+  }
+  /** Have the server type the stored sudo password into a pending prompt. */
+  sudoFill(sessionId: string, promptId: string): void {
+    this.send({ type: "sudoFill", sessionId, promptId });
   }
   resize(sessionId: string, cols: number, rows: number): void {
     this.send({ type: "resize", sessionId, cols, rows });

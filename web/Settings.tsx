@@ -1,5 +1,10 @@
-import { useState, type FormEvent } from "react";
-import { changePassword } from "./auth";
+import { useEffect, useState, type FormEvent } from "react";
+import {
+  changePassword,
+  clearSudoPassword,
+  fetchSudoStatus,
+  saveSudoPassword,
+} from "./auth";
 
 /** Gear button in the sidebar header; opens the settings page. */
 export function SettingsButton({
@@ -55,6 +60,10 @@ export function SettingsPage({
         <section className="system-card">
           <label className="field-label">Change password</label>
           <ChangePasswordForm username={username} />
+        </section>
+        <section className="system-card">
+          <label className="field-label">Sudo password</label>
+          <SudoPasswordForm />
         </section>
       </div>
     </div>
@@ -134,6 +143,80 @@ function ChangePasswordForm({ username }: { username: string }) {
       >
         {busy ? "Changing…" : "Change password"}
       </button>
+    </form>
+  );
+}
+
+/** Write-only: the stored value is never shown or prefilled, only whether one is set. */
+function SudoPasswordForm() {
+  const [set, setSet] = useState<boolean | null>(null);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetchSudoStatus()
+      .then((r) => setSet(r.ok ? !!r.set : null))
+      .catch(() => setSet(null));
+  }, []);
+
+  const run = async (op: () => ReturnType<typeof fetchSudoStatus>, ok: string) => {
+    setError(null);
+    setDone(null);
+    setBusy(true);
+    try {
+      const res = await op();
+      if (res.ok) {
+        setSet(!!res.set);
+        setValue("");
+        setDone(ok);
+      } else setError(res.message ?? "Couldn't update the sudo password.");
+    } catch {
+      setError("Couldn't reach the server.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void run(() => saveSudoPassword(value), "Sudo password saved.");
+  };
+
+  return (
+    <form className="settings-form" onSubmit={submit}>
+      <p className="settings-note">
+        {set === null ? "…" : set ? "A sudo password is stored." : "No sudo password stored."}{" "}
+        Terminals offer to fill it when <code>sudo</code> asks. Stored encrypted; never shown.
+      </p>
+      <input
+        className="login-input"
+        type="password"
+        placeholder={set ? "Replace sudo password" : "Sudo password"}
+        autoComplete="off"
+        data-1p-ignore
+        data-lpignore="true"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      {error && <p className="login-error">{error}</p>}
+      {done && <p className="login-message">{done}</p>}
+      <div className="settings-actions">
+        <button className="login-submit" type="submit" disabled={busy || !value}>
+          {set ? "Replace" : "Save"}
+        </button>
+        {set && (
+          <button
+            type="button"
+            className="settings-logout"
+            disabled={busy}
+            onClick={() => void run(clearSudoPassword, "Sudo password removed.")}
+          >
+            Remove
+          </button>
+        )}
+      </div>
     </form>
   );
 }
