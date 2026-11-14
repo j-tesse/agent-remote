@@ -116,8 +116,11 @@ const AgentsContext = createContext<{
   onOpenSession: (id: string) => void;
   /** Session folder, for stripCwdCd. */
   cwd?: string;
+  /** AI-mode verdicts by the tool call their card gated — shown on that row. */
+  toolTraces: Record<string, AssistantTrace>;
 }>({
   agents: {},
+  toolTraces: {},
   onLoad: () => {},
   held: new Set(),
   known: new Set(),
@@ -237,9 +240,12 @@ function ToolPart({
   standalone?: boolean;
 }) {
   const glyph = toolGlyph(part.status);
-  const { agents, onLoad, client, held, known, onOpenSession, cwd } =
+  const { agents, onLoad, client, held, known, onOpenSession, cwd, toolTraces } =
     useContext(AgentsContext);
   const view = toolView(part, cwd);
+  // Not on the permission card's own copy of the tool — the card is the verdict.
+  const trace = standalone ? toolTraces[part.toolId] : undefined;
+  const [traceOpen, setTraceOpen] = useState(false);
   const run = agents[part.toolId];
   // An empty run keeps the ordinary tool view — see renderPart.
   const nested = run && (run.loading || run.state.messages.length > 0);
@@ -284,6 +290,23 @@ function ToolPart({
           >
             open session ↗
           </button>
+        )}
+        {trace && (
+          <TraceChip
+            trace={trace}
+            open={traceOpen}
+            onToggle={() => setTraceOpen((o) => !o)}
+          />
+        )}
+        {/* In the summary, not the body, so it shows without expanding the
+            tool call; clicks inside must not toggle the <details>. */}
+        {trace && traceOpen && (
+          <div
+            className="chat-assistant-trace-details chat-tool-trace"
+            onClick={(e) => e.preventDefault()}
+          >
+            <TraceSections trace={trace} />
+          </div>
         )}
       </summary>
       {/* A sub-agent's transcript replaces the args dump and the <pre> report —
@@ -622,6 +645,82 @@ const CHECK_MARK: Record<string, string> = {
   cancel: "⊘",
 };
 
+// A trace's expandable record (prompt/thoughts/response, a note's detail).
+// Shared by the trace bubble and the verdict chip on a tool row.
+function TraceSections({ trace }: { trace: AssistantTrace }) {
+  return (
+    <>
+      {trace.detail && (
+        <div className="chat-assistant-trace-section">
+          <div className="chat-assistant-trace-label">Details</div>
+          <pre>
+            <Linked text={trace.detail} />
+          </pre>
+        </div>
+      )}
+      {trace.prompt && (
+        <div className="chat-assistant-trace-section">
+          <div className="chat-assistant-trace-label">Prompt</div>
+          <pre>{trace.prompt}</pre>
+        </div>
+      )}
+      {trace.thoughts && (
+        <div className="chat-assistant-trace-section">
+          <div className="chat-assistant-trace-label">Thoughts</div>
+          <pre>{trace.thoughts}</pre>
+        </div>
+      )}
+      {trace.response && (
+        <div className="chat-assistant-trace-section">
+          <div className="chat-assistant-trace-label">Response</div>
+          <pre>{trace.response}</pre>
+        </div>
+      )}
+    </>
+  );
+}
+
+// The AI-mode verdict on a tool row's right edge: robot + colored word, the
+// reason as a tooltip. Replaces a whole trace line under the turn — the row it
+// sits on already says what was judged. Click expands the record into the row.
+function TraceChip({
+  trace,
+  open,
+  onToggle,
+}: {
+  trace: AssistantTrace;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const word =
+    trace.outcome === "allow"
+      ? "Allowed"
+      : trace.outcome === "deny"
+        ? "Denied"
+        : TRACE_VERDICT[trace.outcome];
+  const expandable = !!(trace.prompt || trace.thoughts || trace.response || trace.detail);
+  return (
+    <button
+      type="button"
+      className="chat-tool-verdict"
+      data-outcome={trace.outcome}
+      aria-expanded={expandable ? open : undefined}
+      title={trace.reason ? `AI mode: ${trace.reason}` : `AI mode: ${trace.summary}`}
+      onClick={(e) => {
+        // Inside <summary>: don't also toggle the tool row.
+        e.preventDefault();
+        e.stopPropagation();
+        if (expandable) onToggle();
+      }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d={ROBOT_ICON} fill="currentColor" />
+      </svg>
+      {word}
+    </button>
+  );
+}
+
 // AI-mode bubble: a deliberation (what prompt the backend assistant sent the LLM
 // about a card, and the model's thoughts/reply) or a plain note from a backend
 // capability. Collapsed, it's a single line; tapping toggles the details.
@@ -784,32 +883,7 @@ function AssistantTraceBubble({
               empty="Starting session…"
             />
           )}
-          {trace.detail && (
-            <div className="chat-assistant-trace-section">
-              <div className="chat-assistant-trace-label">Details</div>
-              <pre>
-                <Linked text={trace.detail} />
-              </pre>
-            </div>
-          )}
-          {trace.prompt && (
-            <div className="chat-assistant-trace-section">
-              <div className="chat-assistant-trace-label">Prompt</div>
-              <pre>{trace.prompt}</pre>
-            </div>
-          )}
-          {trace.thoughts && (
-            <div className="chat-assistant-trace-section">
-              <div className="chat-assistant-trace-label">Thoughts</div>
-              <pre>{trace.thoughts}</pre>
-            </div>
-          )}
-          {trace.response && (
-            <div className="chat-assistant-trace-section">
-              <div className="chat-assistant-trace-label">Response</div>
-              <pre>{trace.response}</pre>
-            </div>
-          )}
+          <TraceSections trace={trace} />
         </div>
       )}
     </div>
@@ -1961,6 +2035,28 @@ export function ChatView({
     state.assistantTraces.find((o) => o.sessionId === t.sessionId) === t
       ? t.sessionId
       : undefined;
+  // A card verdict whose tool call is in the transcript (main or any sub-agent
+  // run) rides on that tool's row as a chip; only orphans keep a line.
+  const toolTraces = useMemo(() => {
+    const ids = new Set<string>();
+    const collect = (msgs: ChatMessage[]) => {
+      for (const m of msgs)
+        for (const p of m.parts) if (p.type === "tool") ids.add(p.toolId);
+    };
+    collect(state.messages);
+    if (state.streaming) collect([state.streaming]);
+    for (const run of Object.values(state.agents)) {
+      collect(run.state.messages);
+      if (run.state.streaming) collect([run.state.streaming]);
+    }
+    const map: Record<string, AssistantTrace> = {};
+    // Last wins: a re-judged card's latest verdict is the one that applied.
+    for (const t of state.assistantTraces)
+      if (t.toolId && ids.has(t.toolId)) map[t.toolId] = t;
+    return map;
+  }, [state.messages, state.streaming, state.agents, state.assistantTraces]);
+  const onToolRow = (t: AssistantTrace) =>
+    !!t.toolId && toolTraces[t.toolId] !== undefined;
   const traceBubble = (t: AssistantTrace, key: string) => (
     <AssistantTraceBubble
       key={key}
@@ -1985,7 +2081,7 @@ export function ChatView({
   const inlineAfter = (messageId: string | undefined) =>
     [
       ...state.assistantTraces
-        .filter((t) => t.anchorMessageId === messageId)
+        .filter((t) => t.anchorMessageId === messageId && !onToolRow(t))
         .map((t, i) => ({
           at: t.at,
           node: traceBubble(t, `trace-${t.requestId}-${t.at}-${i}`),
@@ -2219,8 +2315,9 @@ export function ChatView({
       known: knownSessions,
       onOpenSession,
       cwd: folder,
+      toolTraces,
     }),
-    [state.agents, client, sessionId, heldSessions, knownSessions, onOpenSession, folder],
+    [state.agents, client, sessionId, heldSessions, knownSessions, onOpenSession, folder, toolTraces],
   );
 
   return (

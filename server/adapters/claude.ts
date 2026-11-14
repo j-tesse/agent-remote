@@ -541,7 +541,7 @@ class ClaudeChatSession implements ChatSession {
         abortController: this.abort,
         // Declaring canUseTool is what makes Claude send structured permission
         // requests instead of silently sandboxing/denying.
-        canUseTool: (toolName, toolInput, { suggestions }) =>
+        canUseTool: (toolName, toolInput, { suggestions, toolUseID }) =>
           new Promise<PermissionResult>((resolve) => {
             // Read-only host tools skip the card. Here, not via `allowedTools`,
             // which the SDK warns shadows canUseTool.
@@ -581,6 +581,7 @@ class ClaudeChatSession implements ChatSession {
                       ? "Claude has a few questions"
                       : "Claude has a question",
                   questions,
+                  toolId: toolUseID,
                 },
               });
               return;
@@ -662,6 +663,7 @@ class ClaudeChatSession implements ChatSession {
                 // Rich, harness-agnostic view (diff/code/path) instead of raw
                 // arg JSON — the client renders it via the shared toolView.
                 tool: { name: toolName, args: toolInput },
+                toolId: toolUseID,
                 options: permissionOptions(toolName, suggestions),
               },
             });

@@ -4,6 +4,7 @@ import {
   checksState,
   parseChecks,
   fallbackSlug,
+  pagesUrlFromRemote,
   parseOpenPr,
   prefixedBranch,
   sanitizeBranchName,
@@ -21,6 +22,29 @@ describe("prefixedBranch", () => {
   it("prefixes a branch under someone else's namespace", () => {
     expect(prefixedBranch("feature/x", "joran")).toBe("joran/feature/x");
     expect(prefixedBranch("joranx/y", "joran")).toBe("joran/joranx/y");
+  });
+});
+
+describe("pagesUrlFromRemote", () => {
+  it("maps a user site to the root, for ssh and https remotes", () => {
+    expect(pagesUrlFromRemote("git@github.com:Joran/joran.github.io.git\n")).toBe(
+      "https://joran.github.io/",
+    );
+    expect(pagesUrlFromRemote("https://github.com/joran/Joran.github.io")).toBe(
+      "https://joran.github.io/",
+    );
+    expect(pagesUrlFromRemote("ssh://git@github.com/joran/joran.github.io.git")).toBe(
+      "https://joran.github.io/",
+    );
+  });
+  it("maps another *.github.io repo to a project path", () => {
+    expect(pagesUrlFromRemote("git@github.com:org/docs.github.io.git")).toBe(
+      "https://org.github.io/docs.github.io/",
+    );
+  });
+  it("ignores ordinary repos and junk", () => {
+    expect(pagesUrlFromRemote("git@github.com:joran/agent-remote.git")).toBeNull();
+    expect(pagesUrlFromRemote("")).toBeNull();
   });
 });
 

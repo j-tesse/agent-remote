@@ -2205,6 +2205,61 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* AI-mode verdict on its tool row, pushed to the right edge. A filled chip
+   (it's a control — it expands the deliberation); colour is the verdict. */
+.chat-tool-verdict {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chat-tool-verdict svg {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+.chat-tool-verdict[data-outcome="allow"] {
+  color: var(--success);
+}
+.chat-tool-verdict[data-outcome="deny"],
+.chat-tool-verdict[data-outcome="error"] {
+  color: var(--danger);
+}
+.chat-tool-verdict:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--raised));
+}
+.chat-tool-verdict:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+/* The summary wraps so the record can take a full-width line under the row. */
+.chat-tool summary:has(> .chat-tool-trace) {
+  flex-wrap: wrap;
+}
+/* The deliberation record, a full-width line at the bottom of the summary. */
+.chat-tool-trace {
+  flex-basis: 100%;
+  min-width: 0;
+  cursor: auto;
+  padding: 0 0 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* The tool bubble is already --panel, so the record's blocks rise a step. */
+.chat-tool-trace .chat-assistant-trace-section pre {
+  background: var(--raised);
+}
+
 /* Red/green line diff for Edit calls. Each row is its own block (no newline
    separators), so a blank line needs a min-height to stay visible. Direct
    children only — the word marks inside a row stay inline. */

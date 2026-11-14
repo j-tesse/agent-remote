@@ -70,6 +70,30 @@ export async function gh(
   }
 }
 
+/** GitHub Pages URL for an `origin` remote whose repo name ends in `.github.io`,
+ * else null. `<owner>.github.io` is the user/org site at the root; any other
+ * `*.github.io` name is a project site under `/<repo>/`. Pure. */
+export function pagesUrlFromRemote(remote: string): string | null {
+  const m = /[:/]([^/:\s]+)\/([^/\s]+?)(?:\.git)?\/?\s*$/.exec(remote.trim());
+  if (!m) return null;
+  const [, owner, repo] = m;
+  if (!/\.github\.io$/i.test(repo)) return null;
+  const host = `${owner.toLowerCase()}.github.io`;
+  return repo.toLowerCase() === host ? `https://${host}/` : `https://${host}/${repo}/`;
+}
+
+/** The Pages link for the repo in `cwd`, or null when it isn't a `*.github.io`
+ * repo. Prefers GitHub's own `html_url` (honours a custom domain), falling back
+ * to the derived URL when `gh` can't tell. */
+export async function pagesUrl(cwd: string): Promise<string | null> {
+  const remote = await git(cwd, ["remote", "get-url", "origin"]);
+  const derived = remote.ok ? pagesUrlFromRemote(remote.stdout) : null;
+  if (!derived) return null;
+  const api = await gh(cwd, ["api", "repos/{owner}/{repo}/pages", "--jq", ".html_url"], 30_000);
+  const url = api.ok ? api.stdout.trim() : "";
+  return /^https?:\/\/\S+$/.test(url) ? url : derived;
+}
+
 /** A pull request GitHub already has open for a branch. */
 export interface OpenPr {
   number: number;

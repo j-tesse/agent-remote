@@ -571,6 +571,9 @@ export interface ChatUiRequest {
    * rich view (diff/code/path/…) the transcript uses instead of raw arg JSON.
    * Harness-agnostic — the client folds `{ name, args }` through `toolView`. */
   tool?: { name: string; args?: unknown };
+  /** The transcript tool part (`ChatPart.toolId`) this card gates, when the
+   * harness knows it — lets the UI hang the card's verdict on that tool row. */
+  toolId?: string;
 }
 
 /** A model the session can switch to. */
@@ -784,6 +787,10 @@ export interface AssistantTrace {
    * that turn instead of pinned at the bottom. Assigned by the reducer when the
    * trace is folded in. */
   anchorMessageId?: string;
+  /** The tool call the judged card gated (`ChatUiRequest.toolId`). When that
+   * tool part is in the transcript the verdict renders as a chip on its row
+   * instead of a line of its own. */
+  toolId?: string;
 }
 
 /** An out-of-band line the session reports (compaction boundary, harness error,
