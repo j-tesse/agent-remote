@@ -37,6 +37,7 @@ import {
 } from "../shared/render";
 import type { DiffLine, ToolBody } from "../shared/render";
 import type { Client } from "./client";
+import { emojiQuery, matchEmojis, type Emoji } from "./emoji";
 import { linkRuns } from "./linkify";
 import { formatReset, relativeTime } from "./time";
 import { windowElapsedPct } from "./usage";
@@ -1986,7 +1987,9 @@ export function ChatView({
     // Editing the composed text means taking over: stop the countdown.
     cancelAutoPrompt();
     setDraft(e.target.value);
+    setCaret(e.target.selectionStart);
     setMenuDismissed(false);
+    setEmojiDismissed(false);
     const ta = e.target;
     ta.style.height = "auto";
     ta.style.height = `${ta.scrollHeight}px`;
@@ -2013,6 +2016,10 @@ export function ChatView({
 
   // Escape hides the auto-opened menu until the draft changes again.
   const [menuDismissed, setMenuDismissed] = useState(false);
+  // `:query` emoji completion is caret-based (a query can sit mid-draft).
+  const [caret, setCaret] = useState(0);
+  const [emojiDismissed, setEmojiDismissed] = useState(false);
+  const [emojiSel, setEmojiSel] = useState(0);
 
   // AI-mode trace bubbles render inline right after the assistant turn they
   // explain (anchorMessageId), so the deliberation sits beside its tool call.
@@ -2228,19 +2235,37 @@ export function ChatView({
   // inserted text and re-grows the textarea to fit.
   const insertAtCursor = (text: string) => {
     const ta = textareaRef.current;
-    const start = ta ? ta.selectionStart : draft.length;
-    const end = ta ? ta.selectionEnd : draft.length;
-    const next = draft.slice(0, start) + text + draft.slice(end);
-    setDraft(next);
+    replaceRange(
+      ta ? ta.selectionStart : draft.length,
+      ta ? ta.selectionEnd : draft.length,
+      text,
+    );
+  };
+
+  const replaceRange = (start: number, end: number, text: string) => {
+    setDraft(draft.slice(0, start) + text + draft.slice(end));
+    const at = start + text.length;
+    setCaret(at);
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
-      const caret = start + text.length;
       el.focus();
-      el.setSelectionRange(caret, caret);
+      el.setSelectionRange(at, at);
       el.style.height = "auto";
       el.style.height = `${el.scrollHeight}px`;
     });
+  };
+
+  // `:query` before the caret → emoji strip (desktop too, unlike the key-bar).
+  const emojiQ = emojiQuery(draft, Math.min(caret, draft.length));
+  const emojiMatches = useMemo(
+    () => (emojiQ ? matchEmojis(emojiQ.query) : []),
+    [emojiQ?.query],
+  );
+  const emojiOpen = !exited && emojiMatches.length > 0 && !emojiDismissed;
+  useEffect(() => setEmojiSel(0), [emojiQ?.query]);
+  const acceptEmoji = (em: Emoji) => {
+    if (emojiQ) replaceRange(emojiQ.start, emojiQ.start + emojiQ.query.length + 1, em.e);
   };
 
   // The `/` button is just a key: it types a slash (same as the soft keyboard).
@@ -2492,7 +2517,15 @@ export function ChatView({
             ))}
           </div>
         )}
-      {!exited && keyboardOpen && (
+      {/* Replaces the mobile key-bar while a `:query` is live; shows alone on desktop. */}
+      {emojiOpen ? (
+        <EmojiBar
+          matches={emojiMatches}
+          selected={Math.min(emojiSel, emojiMatches.length - 1)}
+          onSelect={setEmojiSel}
+          onAccept={acceptEmoji}
+        />
+      ) : !exited && keyboardOpen && (
         <div className="chat-key-bar">
           <button
             className="key-button"
@@ -2636,7 +2669,29 @@ export function ChatView({
                 addFiles(files);
               }
             }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={(e) => {
+              // Emoji strip: ←/→ move, Tab/Enter accept, Esc dismisses. Before
+              // Enter-to-send; can't overlap the slash menu (needs `\s:` vs `^/\S*$`).
+              if (emojiOpen && !e.nativeEvent.isComposing) {
+                const n = emojiMatches.length;
+                if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  const d = e.key === "ArrowRight" ? 1 : n - 1;
+                  setEmojiSel((s) => (Math.min(s, n - 1) + d) % n);
+                  return;
+                }
+                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                  e.preventDefault();
+                  acceptEmoji(emojiMatches[Math.min(emojiSel, n - 1)]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setEmojiDismissed(true);
+                  return;
+                }
+              }
               // Command menu: ↑/↓ move, Tab completes, Esc dismisses.
               if (commandsOpen && highlighted) {
                 if (e.key === "Tab") {
@@ -2738,5 +2793,45 @@ export function ChatView({
       )}
     </div>
     </AgentsContext.Provider>
+  );
+}
+
+// `:query` completions; buttons keep composer focus so the soft keyboard stays up.
+function EmojiBar({
+  matches,
+  selected,
+  onSelect,
+  onAccept,
+}: {
+  matches: Emoji[];
+  selected: number;
+  onSelect: (i: number) => void;
+  onAccept: (em: Emoji) => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    ref.current
+      ?.querySelector(".chat-emoji.selected")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selected, matches]);
+  return (
+    <div className="chat-emoji-bar" ref={ref} role="listbox" aria-label="Emoji">
+      {matches.map((em, i) => (
+        <button
+          key={em.e}
+          className={`chat-emoji${i === selected ? " selected" : ""}`}
+          role="option"
+          aria-selected={i === selected}
+          aria-label={em.n}
+          title={`:${em.n}:`}
+          onMouseDown={(e) => e.preventDefault()}
+          onMouseEnter={() => onSelect(i)}
+          onClick={() => onAccept(em)}
+        >
+          {em.e}
+        </button>
+      ))}
+      <span className="chat-emoji-hint">:{matches[selected]?.n}:</span>
+    </div>
   );
 }
