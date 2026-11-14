@@ -146,6 +146,14 @@ describe.skipIf(!config || !enabled || !up)(
       expect(trace!.trace.outcome).toBe("allow");
       expect(trace!.trace.prompt).toContain("No LLM was consulted");
       expect(trace!.trace.summary).toContain("Allowed");
+
+      // (e) The trace names the gated tool call, so the UI can put the verdict
+      // on that tool's row instead of a line of its own.
+      const toolIds = events.flatMap((e) =>
+        e.type === "tool-call" ? [e.toolId] : [],
+      );
+      expect(trace!.trace.toolId, "trace carries no toolId").toBeDefined();
+      expect(toolIds).toContain(trace!.trace.toolId);
     }, 180_000);
   },
 );

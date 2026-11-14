@@ -175,6 +175,7 @@ export function attachAssistant(manager: SessionManager): () => void {
         manager.postAssistantTrace(sessionId, {
           requestId: req.id,
           kind: req.kind as "confirm" | "select",
+          toolId: req.toolId,
           prompt: ALLOW_EVERYTHING_PROMPT,
           response: ALLOW_EVERYTHING_RESPONSE,
           outcome: "allow",
@@ -209,6 +210,7 @@ export function attachAssistant(manager: SessionManager): () => void {
             manager.postAssistantTrace(sessionId, {
               requestId: req.id,
               kind: req.kind as "confirm" | "select" | "questions",
+              toolId: req.toolId,
               prompt: verdict.trace.prompt,
               thoughts: verdict.trace.thoughts,
               response: verdict.trace.response,

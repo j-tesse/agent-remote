@@ -13,6 +13,7 @@
 //   5. merge   — `gh pr merge --squash --delete-branch`   } only when
 //                (refused → poll checks in a live note, retry) }
 //   6. main    — checkout + fast-forward the integration branch  } `autoMerge`
+//      (a `*.github.io` repo also gets a note linking its Pages site)
 // Every step narrates itself into the origin session's transcript as an AI-mode
 // note. Everything is best-effort: a failed step reports and stops, never throws.
 // A merge that lands hands straight back to Continuity Mode, when it's on.
@@ -35,6 +36,7 @@ import {
   listChecks,
   type PrCheck,
   openPrForBranch,
+  pagesUrl,
   prefixedBranch,
   sanitizeBranchName,
   sanitizeCommitMessage,
@@ -216,6 +218,8 @@ export async function runAutoPr(
   }
   if (!(await mergeWhenReady(ctx, target, label))) return;
   note("note", `Merged ${label}`, "squashed, branch deleted");
+  const pages = await pagesUrl(folder);
+  if (pages) note("note", `GitHub Pages: ${pages}`, "may take a minute to rebuild");
 
   // --- 6. back to main -----------------------------------------------------
   await returnToBase(ctx, base);
