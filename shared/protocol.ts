@@ -788,6 +788,9 @@ export interface AssistantTrace {
    * anyways" override (a `run-auto-pr` action). Set server-side, never inferred
    * from kind+outcome — a continuity-only decline carries `kind:"auto-pr"` too. */
   offerAutoPr?: boolean;
+  /** The turn router's own routing verdict, not a step of a run — lets a reader
+   * (wait_session) tell "auto-PR was considered" from "auto-PR ran". */
+  routing?: boolean;
   /** Replace the trace with the same `requestId` in place (keeping its slot,
    * `at` and anchor) instead of appending — a live note, e.g. PR checks. */
   update?: boolean;
