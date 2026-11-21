@@ -134,7 +134,7 @@ export async function runAutoPr(
   if (plan === "nothing") {
     note("note", "Nothing to open a PR for", "the tree is clean");
     await returnToBase(ctx, base);
-    if (opts.continueIfNothing) await runContinuity(ctx, { afterPr: false });
+    if (opts.continueIfNothing) await handOff(ctx, false);
     return;
   }
 
@@ -228,7 +228,14 @@ export async function runAutoPr(
   // The work landed, so this is the `after-pr` moment: hand to Continuity Mode
   // (a no-op when it's off). Still inside the router's single-flight, with the
   // anchor pinned, so it can't race a settle of its own.
-  await runContinuity(ctx, { afterPr: true });
+  await handOff(ctx, true);
+}
+
+/** Continue the loop — unless the session is mid-turn (an agent ran auto-PR on
+ * itself via the run_auto_pr host tool): its own turn end routes it then. */
+async function handOff(ctx: RunContext, afterPr: boolean): Promise<void> {
+  if (ctx.manager.chatState(ctx.sessionId)?.busy) return;
+  await runContinuity(ctx, { afterPr });
 }
 
 /** Merge the PR. Assumes no checks gate it; if the merge is refused, poll its
