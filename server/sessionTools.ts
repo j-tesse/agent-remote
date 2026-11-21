@@ -6,6 +6,7 @@ import type { SessionManager } from "./sessions/manager.js";
 import type { HostTool, HostToolParam, HostToolSet } from "./adapters/types.js";
 import type {
   AssistantSettings,
+  AssistantTrace,
   ChatAction,
   ChatState,
   ChatUiRequest,
@@ -20,6 +21,8 @@ export const SPAWN_WINDOW_MS = 10 * 60_000;
 const WAIT_DEFAULT_SEC = 120;
 const WAIT_MIN_SEC = 5;
 const WAIT_MAX_SEC = 600;
+/** Auto-PR drafts the PR in a whole agent session — minutes, not seconds. */
+const PR_WAIT_DEFAULT_SEC = 300;
 /** Tail of a reply returned to the caller — a verdict lives in the closing lines. */
 const REPLY_MAX_CHARS = 8_000;
 
@@ -95,12 +98,19 @@ export function autoPrReport(
 ): { ran: boolean; notes: string[] } | undefined {
   if (!state) return undefined;
   const since = [...state.messages].reverse().find((m) => m.role === "user")?.createdAt ?? 0;
-  const traces = state.assistantTraces.filter((t) => t.kind === "auto-pr" && t.at >= since);
+  const traces = autoPrTraces(state, since);
   if (!state.assistant.autoPr.enabled && !traces.length) return undefined;
-  return {
-    ran: traces.some((t) => !t.routing),
-    notes: traces.map((t) => (t.reason ? `${t.summary} (${t.reason})` : t.summary)),
-  };
+  return { ran: traces.some((t) => !t.routing), notes: traces.map(noteLine) };
+}
+
+const autoPrTraces = (state: ChatState, since: number) =>
+  state.assistantTraces.filter((t) => t.kind === "auto-pr" && t.at >= since);
+const noteLine = (t: AssistantTrace) => (t.reason ? `${t.summary} (${t.reason})` : t.summary);
+
+/** What run_auto_pr reports: the run's own step notes since `since` (routing
+ * verdicts excluded — a direct run isn't routed). */
+export function autoPrRunNotes(state: ChatState | undefined, since: number): string[] {
+  return state ? autoPrTraces(state, since).filter((t) => !t.routing).map(noteLine) : [];
 }
 
 /** Card kinds a spawning session may answer. Permission (`select`/`confirm`) and
@@ -329,6 +339,29 @@ export function attachSessionTools(
       });
     });
 
+  /** Resolve once `id` holds no `label` work, it ends, or after `sec`. */
+  const released = (id: string, label: string, sec: number) =>
+    new Promise<void>((resolve) => {
+      const held = () => manager.assistantWork(id).includes(label);
+      if (!held()) return resolve();
+      const done = () => {
+        clearTimeout(timer);
+        unsubscribe();
+        resolve();
+      };
+      const timer = setTimeout(done, sec * 1000);
+      const unsubscribe = manager.subscribe({
+        onStarted() {},
+        onOutput() {},
+        onExit: (sid) => sid === id && done(),
+        onRemoved: (sid) => sid === id && done(),
+        onAssistantWork: (sid) => sid === id && !held() && done(),
+      });
+    });
+
+  /** session id → when the auto-PR run we started on it began. */
+  const prRuns = new Map<string, number>();
+
   const send = (id: string, text: string) => {
     const child = children.get(id)!;
     child.sent++;
@@ -474,6 +507,54 @@ export function attachSessionTools(
           throw new Error(`Session is ${status}; only an idle session takes a prompt`);
         send(id, prompt);
         return JSON.stringify({ sessionId: id, status: "running" });
+      },
+    },
+    {
+      name: "run_auto_pr",
+      description:
+        "Submit finished work as a pull request now, via the Auto PR pipeline (branch, commit, push, open a PR — and squash-merge it if that session's auto-merge is on), regardless of whether Auto PR is enabled. Defaults to THIS session — call it once your change is complete; it commits the whole working tree of the session's folder. Or pass a session you spawned (it must be idle). Waits (bounded) for the run; returns status done with `notes` (the steps taken, incl. the PR URL), or running on timeout — call again to keep waiting.",
+      params: {
+        sessionId: {
+          type: "string",
+          optional: true,
+          description: "A session you spawned. Defaults to this session.",
+        },
+        timeoutSec: {
+          type: "number",
+          optional: true,
+          description: `Max seconds to wait (${WAIT_MIN_SEC}–${WAIT_MAX_SEC}, default ${PR_WAIT_DEFAULT_SEC}).`,
+        },
+      },
+      async run(args) {
+        const id = str(args.sessionId) || caller;
+        if (id !== caller) {
+          const child = own(caller, id);
+          const status = childStatus(manager.chatState(id), manager.sessionInfo(id), child.sent, manager.assistantWork(id));
+          if (status !== "idle" && !manager.assistantWork(id).includes("auto-pr"))
+            throw new Error(`Session is ${status}; auto-PR only runs on an idle session`);
+        }
+        const work = manager.assistantWork(id);
+        // A run already in flight (this tool timed out, or the turn router got
+        // there first): wait on it rather than refuse.
+        if (!work.includes("auto-pr")) {
+          if (work.length)
+            throw new Error(`The session's AI assistant is busy (${[...new Set(work)].join(", ")}); try again shortly`);
+          const startedAt = Date.now();
+          manager.chatAction(id, { type: "run-auto-pr" });
+          // The turn router takes its hold synchronously, so no hold = not started.
+          if (!manager.assistantWork(id).includes("auto-pr"))
+            throw new Error("Auto PR could not start (session not running?)");
+          prRuns.set(id, startedAt);
+        }
+        await released(id, "auto-pr", clampWaitSec(args.timeoutSec ?? PR_WAIT_DEFAULT_SEC));
+        const state = manager.chatState(id);
+        const since =
+          prRuns.get(id) ??
+          [...(state?.messages ?? [])].reverse().find((m) => m.role === "user")?.createdAt ??
+          0;
+        const status = manager.assistantWork(id).includes("auto-pr") ? "running" : "done";
+        if (status === "done") prRuns.delete(id);
+        return JSON.stringify({ sessionId: id, status, notes: autoPrRunNotes(state, since) });
       },
     },
     {

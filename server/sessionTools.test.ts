@@ -5,6 +5,7 @@ import {
   clampWaitSec,
   lastReply,
   autoPrReport,
+  autoPrRunNotes,
   overlayAssistant,
   ASSISTANT_PARAM,
   describeRequest,
@@ -317,5 +318,31 @@ describe("autoPrReport", () => {
   });
   it("reports a Run-now run even with auto-PR off", () => {
     expect(autoPrReport(withPr([trace({ summary: "Pushed b to origin" })], false))?.ran).toBe(true);
+  });
+});
+
+describe("autoPrRunNotes", () => {
+  const trace = (over: Partial<AssistantTrace>): AssistantTrace => ({
+    requestId: Math.random().toString(36),
+    kind: "auto-pr",
+    outcome: "note",
+    summary: "x",
+    at: 10,
+    ...over,
+  });
+  it("the run's own steps since it started: no routing verdicts, other kinds or older notes", () => {
+    const s = state({
+      assistantTraces: [
+        trace({ summary: "Opened PR #1", at: 1 }),
+        trace({ summary: "Not ready for a PR", routing: true }),
+        trace({ summary: "Pushed b to origin" }),
+        trace({ kind: "continuity", summary: "other" }),
+        trace({ summary: "Opened PR #2", reason: "https://x/2" }),
+      ],
+    });
+    expect(autoPrRunNotes(s, 5)).toEqual(["Pushed b to origin", "Opened PR #2 (https://x/2)"]);
+  });
+  it("empty for a gone session", () => {
+    expect(autoPrRunNotes(undefined, 0)).toEqual([]);
   });
 });
