@@ -87,6 +87,22 @@ export function lastReply(state: ChatState | undefined): string {
     : text;
 }
 
+/** Auto-PR's outcome for the child's latest turn (notes posted since its last
+ * prompt): whether a run actually executed, plus its narration lines. Undefined
+ * when auto-PR is off and nothing ran (e.g. no "Run now"). */
+export function autoPrReport(
+  state: ChatState | undefined,
+): { ran: boolean; notes: string[] } | undefined {
+  if (!state) return undefined;
+  const since = [...state.messages].reverse().find((m) => m.role === "user")?.createdAt ?? 0;
+  const traces = state.assistantTraces.filter((t) => t.kind === "auto-pr" && t.at >= since);
+  if (!state.assistant.autoPr.enabled && !traces.length) return undefined;
+  return {
+    ran: traces.some((t) => !t.routing),
+    notes: traces.map((t) => (t.reason ? `${t.summary} (${t.reason})` : t.summary)),
+  };
+}
+
 /** Card kinds a spawning session may answer. Permission (`select`/`confirm`) and
  * `plan` cards stay with the user — answering them would grant the child what
  * `overlayAssistant` refuses to (same split as assistant.ts's capabilities). */
@@ -252,6 +268,7 @@ export function attachSessionTools(
     const state = manager.chatState(id);
     const work = manager.assistantWork(id);
     const status = childStatus(state, info, child?.sent ?? 0, work);
+    const autoPr = status === "idle" || status === "exited" ? autoPrReport(state) : undefined;
     return {
       sessionId: id,
       harness: info?.harnessId,
@@ -262,6 +279,7 @@ export function attachSessionTools(
       ...(status === "idle" || status === "exited"
         ? { reply: lastReply(state) }
         : {}),
+      ...(autoPr ? { autoPr } : {}),
       ...(status === "waiting-for-input"
         ? { pending: state?.pendingRequests.map(describeRequest) }
         : {}),
@@ -382,7 +400,7 @@ export function attachSessionTools(
     {
       name: "wait_session",
       description:
-        "Wait (bounded) for a session you spawned to finish its turn, including any AI-assistant work that follows it (auto-PR, continuity, auto-answered cards). Returns status running (timed out — call again; `assistant` names AI-assistant work still in flight), idle (with its reply), waiting-for-input (`pending` lists the cards; answer `answerable` ones with answer_session, then wait again), or exited.",
+        "Wait (bounded) for a session you spawned to finish its turn, including any AI-assistant work that follows it (auto-PR, continuity, auto-answered cards). Returns status running (timed out — call again; `assistant` names AI-assistant work still in flight), idle (with its reply — all its assistant text since the latest prompt — and, when auto-PR is enabled there, `autoPr` {ran, notes}: whether a PR run executed and what it did), waiting-for-input (`pending` lists the cards; answer `answerable` ones with answer_session, then wait again), or exited.",
       readOnly: true,
       params: {
         sessionId: { type: "string", description: "Id from spawn_session." },

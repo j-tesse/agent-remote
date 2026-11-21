@@ -4,6 +4,7 @@ import {
   childStatus,
   clampWaitSec,
   lastReply,
+  autoPrReport,
   overlayAssistant,
   ASSISTANT_PARAM,
   describeRequest,
@@ -12,7 +13,7 @@ import {
 import { zodParam } from "./adapters/claude.js";
 import { SessionManager } from "./sessions/manager.js";
 import { emptyChatState } from "../shared/chat.js";
-import type { ChatMessage, ChatState, ChatUiRequest } from "../shared/protocol.js";
+import type { AssistantTrace, ChatMessage, ChatState, ChatUiRequest } from "../shared/protocol.js";
 
 const msg = (role: ChatMessage["role"], text: string): ChatMessage => ({
   id: Math.random().toString(36),
@@ -273,5 +274,48 @@ describe("question cards for the spawning session", () => {
   it("never answers permission or plan cards", () => {
     expect(() => answerAction(perm, { text: "allow" })).toThrow(/needs the user/);
     expect(() => answerAction({ id: "p", kind: "plan", title: "Plan" }, {})).toThrow(/needs the user/);
+  });
+});
+
+describe("autoPrReport", () => {
+  const trace = (over: Partial<AssistantTrace>): AssistantTrace => ({
+    requestId: Math.random().toString(36),
+    kind: "auto-pr",
+    outcome: "note",
+    summary: "x",
+    at: 10,
+    ...over,
+  });
+  const user = { ...msg("user", "do it"), createdAt: 5 };
+  const withPr = (traces: AssistantTrace[], enabled = true) => {
+    const s = state({ messages: [user, msg("assistant", "done")], assistantTraces: traces });
+    s.assistant = { ...s.assistant, autoPr: { ...s.assistant.autoPr, enabled } };
+    return s;
+  };
+
+  it("absent when auto-PR is off and nothing ran", () => {
+    expect(autoPrReport(withPr([], false))).toBeUndefined();
+  });
+  it("not run when only the router's verdict was posted", () => {
+    expect(
+      autoPrReport(withPr([trace({ outcome: "deny", summary: "Not ready for a PR", reason: "tests fail", routing: true })])),
+    ).toEqual({ ran: false, notes: ["Not ready for a PR (tests fail)"] });
+  });
+  it("ran when a run step was posted; ignores notes from earlier turns", () => {
+    const r = autoPrReport(
+      withPr([
+        trace({ summary: "Opened PR #1", at: 1 }),
+        trace({ outcome: "allow", summary: "Turn looks finished — opening a PR", routing: true }),
+        trace({ summary: "Opened PR #2", reason: "https://x/2" }),
+        trace({ kind: "continuity", summary: "other" }),
+      ]),
+    );
+    expect(r).toEqual({
+      ran: true,
+      notes: ["Turn looks finished — opening a PR", "Opened PR #2 (https://x/2)"],
+    });
+  });
+  it("reports a Run-now run even with auto-PR off", () => {
+    expect(autoPrReport(withPr([trace({ summary: "Pushed b to origin" })], false))?.ran).toBe(true);
   });
 });

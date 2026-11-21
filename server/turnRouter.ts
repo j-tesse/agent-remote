@@ -97,6 +97,8 @@ export type Note = (
     session?: string;
     /** Offer a "Run anyways" auto-PR override on the bubble. */
     offerAutoPr?: boolean;
+    /** A routing verdict, not a run step. */
+    routing?: boolean;
     /** Fixed id + `update`: later notes with this id rewrite it in place. */
     id?: string;
     update?: boolean;
@@ -161,6 +163,7 @@ export function attachTurnRouter(
         detail: extra?.detail,
         sessionId: extra?.session,
         offerAutoPr: extra?.offerAutoPr,
+        routing: extra?.routing,
         update: extra?.update,
         checks: extra?.checks,
         at: Date.now(),
@@ -229,7 +232,7 @@ export function attachTurnRouter(
         "deny",
         "Nothing to act on",
         "the agent never replied to the last prompt",
-        { offerAutoPr: canPr },
+        { offerAutoPr: canPr, routing: true },
       );
       return;
     }
@@ -263,7 +266,7 @@ export function attachTurnRouter(
           ? verdict.reason || undefined
           : "no usable verdict — opening the PR anyway",
         // Declined by the router, not by the developer: let them overrule it.
-        { trace: verdict?.trace, offerAutoPr: !submit },
+        { trace: verdict?.trace, offerAutoPr: !submit, routing: true },
       );
       if (submit) {
         const release = manager.holdAssistant(sessionId, "auto-pr");
@@ -288,7 +291,7 @@ export function attachTurnRouter(
         ? verdict.reason || undefined
         : "no usable verdict from the LLM endpoint",
       // The PR stage already posted its own "Run anyways".
-      { trace: verdict?.trace, offerAutoPr: false },
+      { trace: verdict?.trace, offerAutoPr: false, routing: true },
     );
     if (!go) return;
     const release = manager.holdAssistant(sessionId, "continuity");
