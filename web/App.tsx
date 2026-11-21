@@ -1039,6 +1039,8 @@ function Workspace({
                         ASSISTANT_LONG_PRESS_MS,
                       );
                     }}
+                    // Keep the composer focused so a toggle doesn't drop the soft keyboard.
+                    onMouseDown={(e) => e.preventDefault()}
                     onPointerUp={cancelAssistantPress}
                     onPointerLeave={cancelAssistantPress}
                     onPointerCancel={cancelAssistantPress}
