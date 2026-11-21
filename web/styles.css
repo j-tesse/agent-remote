@@ -1948,6 +1948,34 @@ body {
   opacity: 0.5;
   border-style: dashed;
 }
+/* Waiting for the turn to end (long-press Send → Schedule); readable, cancellable. */
+.chat-bubble.user.queued.scheduled {
+  opacity: 0.75;
+}
+.chat-scheduled-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.chat-scheduled-cancel {
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.chat-scheduled-cancel:hover,
+.chat-scheduled-cancel:focus-visible {
+  outline: none;
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
 
 /* Attached images inside a user bubble (and pending-attachment thumbnails). */
 .chat-bubble-images {
@@ -3201,6 +3229,32 @@ button.auto-press::after {
 .chat-send:disabled {
   opacity: 0.4;
   cursor: default;
+}
+/* Long-press opens the steer/schedule menu: no text selection or OS callout. */
+.chat-send {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.chat-send-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-self: flex-end;
+}
+.chat-send-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: auto;
+  right: 0;
+  min-width: 260px;
+}
+/* Undo `.chat-composer button`'s Send-sized padding for the menu's rows. */
+.chat-composer .chat-menu-item {
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 400;
 }
 .chat-stop {
   background: var(--danger);

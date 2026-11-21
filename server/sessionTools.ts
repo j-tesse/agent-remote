@@ -56,7 +56,13 @@ export function childStatus(
   if (!info || info.status === "exited" || !state) return "exited";
   if (assistantWork.length) return "running";
   if (state.pendingRequests.length) return "waiting-for-input";
-  if (state.busy || state.streaming || state.queued.length || state.autoPrompt)
+  if (
+    state.busy ||
+    state.streaming ||
+    state.queued.length ||
+    state.scheduled.length ||
+    state.autoPrompt
+  )
     return "running";
   const prompts = state.messages.filter((m) => m.role === "user").length;
   if (prompts < sent) return "running";

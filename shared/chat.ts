@@ -96,7 +96,8 @@ export function isEmptyChat(s: ChatState): boolean {
     !s.streaming &&
     !s.busy &&
     s.pendingRequests.length === 0 &&
-    s.queued.length === 0
+    s.queued.length === 0 &&
+    s.scheduled.length === 0
   );
 }
 
@@ -114,6 +115,7 @@ export function emptyChatState(): ChatState {
     busy: false,
     pendingRequests: [],
     queued: [],
+    scheduled: [],
     notices: [],
     models: [],
     currentModel: null,
@@ -327,6 +329,9 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
     case "queue":
       return { ...state, queued: event.queued };
 
+    case "scheduled":
+      return { ...state, scheduled: event.scheduled };
+
     case "ui-request":
       return {
         ...state,
@@ -484,6 +489,7 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
         streaming: null,
         busy: false,
         queued: [],
+        scheduled: [],
         pendingRequests: [],
         promptSuggestions: [],
         autoDecisions: {},

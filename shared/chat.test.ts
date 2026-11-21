@@ -610,6 +610,7 @@ describe("applyChatEvent rewind", () => {
         { type: "part-start", kind: "text" },
         { type: "part-delta", kind: "text", delta: "half…" },
         { type: "queue", queued: ["later"] },
+        { type: "scheduled", scheduled: [{ id: "s1", text: "after" }] },
         {
           type: "ui-request",
           request: { id: "r1", kind: "confirm", title: "Run it?" },
@@ -632,6 +633,8 @@ describe("applyChatEvent rewind", () => {
     expect(state.streaming).toBeNull();
     expect(state.busy).toBe(false);
     expect(state.queued).toEqual([]);
+    expect(before.scheduled).toHaveLength(1);
+    expect(state.scheduled).toEqual([]);
     expect(state.pendingRequests).toEqual([]);
     expect(state.promptSuggestions).toEqual([]);
     expect(state.autoDecisions).toEqual({});

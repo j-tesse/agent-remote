@@ -74,6 +74,12 @@ interface Session {
   /** Opaque harness-native handle for resuming this conversation later, once the
    * adapter has reported it (chat harnesses that support resume only). */
   resumeKey?: string;
+  /** Scheduled prompts as sent (resolved image bytes included), keyed by the
+   * `ChatState.scheduled` id — the state copy carries display refs only. */
+  scheduledActions?: Map<string, Extract<ChatAction, { type: "prompt" }>>;
+  /** A scheduled prompt went out and its turn hasn't visibly started: ignore
+   * further `busy:false` (pi settles twice) until busy:true / assistant-start. */
+  scheduleGate?: boolean;
 }
 
 /** Notified of session lifecycle and output. One listener per WS connection,
@@ -476,6 +482,46 @@ export class SessionManager {
       for (const l of this.listeners) l.onEvent?.(info.id, mirrored);
     }
     for (const l of this.listeners) l.onChatEvent?.(info.id, event);
+    // After the fan-out: turn-end listeners saw `scheduled` non-empty and stood
+    // down (turn router, suggestions, wait_session), so the scheduled prompt
+    // runs before any of them.
+    if ((event.type === "busy" && event.busy) || event.type === "assistant-start")
+      session.scheduleGate = false;
+    else if (event.type === "busy") this.deliverScheduled(session);
+    else if (event.type === "rewind") session.scheduledActions?.clear();
+  }
+
+  /** Send the oldest scheduled prompt, if the session has just come to rest. */
+  private deliverScheduled(session: Session): void {
+    const chat = session.chat;
+    if (!chat || session.scheduleGate || session.info.status !== "running") return;
+    if (chat.busy || chat.pendingRequests.length || !chat.scheduled.length) return;
+    const [next, ...rest] = chat.scheduled;
+    const action = session.scheduledActions?.get(next.id) ?? {
+      type: "prompt" as const,
+      text: next.text,
+    };
+    session.scheduledActions?.delete(next.id);
+    session.scheduleGate = true;
+    this.applyChat(session, { type: "scheduled", scheduled: rest });
+    this.dispatchPrompt(session, action);
+  }
+
+  /** A prompt the manager itself sends: announced to listeners like any other,
+   * but leaves the draft alone — the user may be typing the next one. */
+  private dispatchPrompt(
+    session: Session,
+    action: Extract<ChatAction, { type: "prompt" }>,
+  ): void {
+    for (const l of this.listeners) l.onChatAction?.(session.info.id, action);
+    this.forward(session, action);
+  }
+
+  private setScheduled(session: Session, scheduled: ChatState["scheduled"]): void {
+    const keep = new Set(scheduled.map((p) => p.id));
+    for (const id of session.scheduledActions?.keys() ?? [])
+      if (!keep.has(id)) session.scheduledActions!.delete(id);
+    this.applyChat(session, { type: "scheduled", scheduled });
   }
 
   /** Perform a chat action. Session-based: the adapter's ChatSession handles it.
@@ -520,11 +566,46 @@ export class SessionManager {
       this.applyChat(session, { type: "auto-prompt-cleared", id: action.id });
       return;
     }
-    if (action.type === "prompt") {
+    if (action.type === "prompt" || action.type === "schedule-prompt") {
       // Sending consumes the draft, whatever it holds. (Guarded only to skip a
       // no-op broadcast: the sender usually cleared it already.)
       if (session.chat?.draft) this.applyChat(session, { type: "draft", text: "" });
     }
+    if (action.type === "schedule-prompt") {
+      const prompt = { ...action, type: "prompt" as const };
+      if (!session.chat?.busy) {
+        this.dispatchPrompt(session, prompt);
+        return;
+      }
+      const id = randomUUID();
+      (session.scheduledActions ??= new Map()).set(id, prompt);
+      const images = action.images?.map(({ data: _data, ...ref }) => ref);
+      this.setScheduled(session, [
+        ...session.chat.scheduled,
+        { id, text: action.text, ...(images?.length ? { images } : {}) },
+      ]);
+      return;
+    }
+    if (action.type === "cancel-scheduled") {
+      const scheduled = session.chat?.scheduled ?? [];
+      if (scheduled.some((p) => p.id === action.id))
+        this.setScheduled(session, scheduled.filter((p) => p.id !== action.id));
+      return;
+    }
+    // Stop means stop: what was scheduled after this turn goes back to the
+    // composer rather than firing when the aborted turn settles.
+    if (action.type === "abort" && session.chat?.scheduled.length) {
+      const text = [session.chat.draft, ...session.chat.scheduled.map((p) => p.text)]
+        .filter((t) => t.trim())
+        .join("\n\n");
+      this.setScheduled(session, []);
+      this.applyChat(session, { type: "draft", text });
+    }
+    this.forward(session, action);
+  }
+
+  /** Hand an action to the harness: its ChatSession, or the translator → stdin. */
+  private forward(session: Session, action: ChatAction): void {
     if (session.chatSession) {
       session.chatSession.action(action);
       return;
