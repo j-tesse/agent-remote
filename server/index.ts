@@ -787,7 +787,10 @@ wss.on("connection", (ws: WebSocket, user: string) => {
           // Resolve any attached image refs to base64 here (harness-agnostic),
           // loading only images owned by this connection's user. Foreign/unknown
           // ids are dropped. Then dispatch to the manager/adapter.
-          if (action.type === "prompt" && action.images?.length) {
+          if (
+            (action.type === "prompt" || action.type === "schedule-prompt") &&
+            action.images?.length
+          ) {
             void resolvePromptImages(user, action.images).then((images) => {
               manager.chatAction(sessionId, { ...action, images });
             });

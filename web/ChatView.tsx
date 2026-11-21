@@ -17,6 +17,7 @@ import type {
   ChatEffort,
   ChatModel,
   ChatImageRef,
+  ScheduledPrompt,
   ChatMessage,
   ChatPart,
   ChatState,
@@ -1698,6 +1699,134 @@ function RewindConfirm({
   );
 }
 
+/** Long enough not to fire on a deliberate tap, short of the OS's own callout. */
+const LONG_PRESS_MS = 450;
+
+/** Send/Steer. While the agent is busy a long-press (or right-click) opens a
+ * choice: steer now, or schedule the prompt for when the turn ends. */
+function SendButton({
+  busy,
+  disabled,
+  className,
+  style,
+  onSend,
+  onSchedule,
+}: {
+  busy: boolean;
+  disabled: boolean;
+  className: string;
+  style?: React.CSSProperties;
+  onSend: () => void;
+  onSchedule: () => void;
+}) {
+  const [menu, setMenu] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  // The press that opened the menu must not also send on release.
+  const opened = useRef(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canSchedule = busy && !disabled;
+
+  useEffect(() => {
+    if (!canSchedule) setMenu(false);
+  }, [canSchedule]);
+  useEffect(() => {
+    if (!menu) return;
+    const outside = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setMenu(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    document.addEventListener("pointerdown", outside);
+    window.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [menu]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const cancelPress = () => {
+    window.clearTimeout(timer.current);
+    timer.current = undefined;
+  };
+  const open = () => {
+    cancelPress();
+    opened.current = true;
+    setMenu(true);
+  };
+
+  return (
+    <div className="chat-send-wrap" ref={wrapRef}>
+      <button
+        className={className}
+        style={style}
+        disabled={disabled}
+        title={
+          busy
+            ? "Steer the current run — long-press (or Alt+Enter) to schedule it for when the turn ends"
+            : undefined
+        }
+        onPointerDown={() => {
+          opened.current = false;
+          if (!canSchedule) return;
+          cancelPress();
+          timer.current = window.setTimeout(open, LONG_PRESS_MS);
+        }}
+        onPointerUp={cancelPress}
+        onPointerLeave={cancelPress}
+        onPointerCancel={cancelPress}
+        // Desktop right-click, and the long-press some mobile browsers report.
+        onContextMenu={(e) => {
+          if (!canSchedule) return;
+          e.preventDefault();
+          open();
+        }}
+        onClick={() => {
+          if (opened.current) {
+            opened.current = false;
+            return;
+          }
+          onSend();
+        }}
+      >
+        {busy ? "Steer" : "Send"}
+      </button>
+      {menu && (
+        <div className="chat-menu chat-send-menu" role="menu">
+          <button
+            role="menuitem"
+            className="chat-menu-item"
+            onClick={() => {
+              setMenu(false);
+              onSend();
+            }}
+          >
+            <span className="chat-menu-label">
+              Steer now
+              <span className="chat-menu-detail">Interject into the current run</span>
+            </span>
+          </button>
+          <button
+            role="menuitem"
+            className="chat-menu-item"
+            autoFocus
+            onClick={() => {
+              setMenu(false);
+              onSchedule();
+            }}
+          >
+            <span className="chat-menu-label">
+              Schedule for when the turn ends
+              <span className="chat-menu-detail">
+                Sent before Auto PR, Continuity or a waiting session pick the turn up
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatView({
   client,
   sessionId,
@@ -1937,7 +2066,8 @@ export function ChatView({
     state.capabilities.rewind === true &&
     state.messages.some((m) => m.role === "user");
 
-  const send = useCallback(() => {
+  // `schedule-prompt`: hold it until the current turn ends instead of steering.
+  const submit = useCallback((kind: "prompt" | "schedule-prompt") => {
     const text = draft.trim();
     // `/resume` and `/rewind` are client-only (no harness command): Tab-completing
     // one then pressing Enter opens its picker instead of prompting the harness.
@@ -1958,7 +2088,7 @@ export function ChatView({
     // Don't send while an image is still uploading.
     if (attachments.some((a) => a.status === "uploading")) return;
     client.chatAction(sessionId, {
-      type: "prompt",
+      type: kind,
       text,
       images: images.length ? images : undefined,
     });
@@ -1981,6 +2111,15 @@ export function ChatView({
     canRewind,
     pushDraft,
   ]);
+  const send = useCallback(() => submit("prompt"), [submit]);
+
+  // Withdrawing a scheduled prompt hands its text back to the composer to edit.
+  const unschedule = (p: ScheduledPrompt) => {
+    client.chatAction(sessionId, { type: "cancel-scheduled", id: p.id });
+    const next = draft.trim() ? `${draft}\n\n${p.text}` : p.text;
+    setDraft(next);
+    pushDraft(next);
+  };
 
   // Auto-grow the composer with its content (up to the CSS max-height).
   const onDraftChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -2458,6 +2597,35 @@ export function ChatView({
             <Markdown text={text} />
           </div>
         ))}
+        {state.scheduled.map((p, i) => (
+          <div key={p.id} className="chat-bubble user queued scheduled">
+            <div className="chat-scheduled-head">
+              <span>
+                {i === 0 ? "Scheduled · sends when this turn ends" : "Scheduled · next in line"}
+              </span>
+              <button
+                className="chat-scheduled-cancel"
+                title="Unschedule (back to the composer)"
+                onClick={() => unschedule(p)}
+              >
+                ×
+              </button>
+            </div>
+            <Markdown text={p.text} />
+            {p.images?.length ? (
+              <div className="chat-bubble-images">
+                {p.images.map((img) => (
+                  <img
+                    key={img.id}
+                    className="chat-image"
+                    src={`/api/upload/${img.id}`}
+                    alt={img.name ?? "image"}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
         {state.pendingRequests.map((req) => (
           <UiRequestCard
             key={req.id}
@@ -2717,7 +2885,9 @@ export function ChatView({
               }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                send();
+                // Alt+Enter = the long-press menu's "schedule" (desktop shortcut).
+                if (e.altKey && state.busy) submit("schedule-prompt");
+                else send();
               }
             }}
           />
@@ -2732,7 +2902,7 @@ export function ChatView({
               Stop
             </button>
           )}
-          <button
+          <SendButton
             className={`chat-send${armedPrompt ? " auto-press" : ""}`}
             // The ring is display-only — the backend sends it. `animation-delay`
             // is negative so a client joining mid-countdown paints the arc it's
@@ -2751,10 +2921,10 @@ export function ChatView({
                 : undefined
             }
             disabled={!canSend}
-            onClick={send}
-          >
-            {state.busy ? "Steer" : "Send"}
-          </button>
+            busy={state.busy}
+            onSend={send}
+            onSchedule={() => submit("schedule-prompt")}
+          />
         </div>
       )}
       {/* `/rewind`: pick one of our own prompts to jump back to (newest first,

@@ -73,7 +73,7 @@ export function buildSuggestionTranscript(
 export function shouldSuggest(state: ChatState): boolean {
   if (state.busy) return false;
   if (state.pendingRequests.length > 0) return false;
-  if (state.queued.length > 0) return false;
+  if (state.queued.length > 0 || state.scheduled.length > 0) return false;
   if (state.promptSuggestions.length > 0) return false;
   const hasUser = state.messages.some((m) => m.role === "user");
   const hasAssistant = state.messages.some(

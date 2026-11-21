@@ -71,6 +71,8 @@ export function shouldRouteTurn(state: ChatState): boolean {
   if (state.busy) return false;
   if (state.pendingRequests.length > 0) return false;
   if (state.queued.length > 0) return false;
+  // The developer already said what's next; the manager sends it now.
+  if (state.scheduled.length > 0) return false;
   // A prompt is already waiting out its countdown — that IS this turn's answer.
   if (state.autoPrompt) return false;
   return (

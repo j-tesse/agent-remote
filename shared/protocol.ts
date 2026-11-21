@@ -842,6 +842,14 @@ export interface RewindPreview {
   deletions?: number;
 }
 
+/** A prompt waiting for the current turn to end (see `ChatState.scheduled`).
+ * Images are display refs only — the resolved bytes stay server-side. */
+export interface ScheduledPrompt {
+  id: string;
+  text: string;
+  images?: ChatImageRef[];
+}
+
 /** Full renderable state of a chat session. The server snapshots this on
  * (re)connect; both sides keep it current via `applyChatEvent`. */
 export interface ChatState {
@@ -852,6 +860,10 @@ export interface ChatState {
   pendingRequests: ChatUiRequest[];
   /** Steering/follow-up text queued behind the current run. */
   queued: string[];
+  /** Prompts held back until the current turn ends (long-press Send → Schedule),
+   * oldest first. The manager sends one per turn end, before the turn router /
+   * wait_session / suggestions see the turn as settled. */
+  scheduled: ScheduledPrompt[];
   /** Transient notices (compaction boundaries, errors, retries); capped. */
   notices: ChatNotice[];
   /** Models the session can switch between (empty if the harness doesn't
@@ -932,6 +944,8 @@ export type ChatEvent =
   | { type: "tool-update"; toolId: string; output: string }
   | { type: "tool-end"; toolId: string; output: string; isError: boolean }
   | { type: "queue"; queued: string[] }
+  /** The scheduled-prompt list changed (replaces it wholesale). */
+  | { type: "scheduled"; scheduled: ScheduledPrompt[] }
   | { type: "ui-request"; request: ChatUiRequest }
   | { type: "ui-request-done"; requestId: string }
   | { type: "notice"; level: "info" | "warning" | "error"; text: string }
@@ -1004,6 +1018,11 @@ export type ChatEvent =
 /** Actions the browser can take on a chat session. */
 export type ChatAction =
   | { type: "prompt"; text: string; images?: ChatImageRef[] }
+  /** Send `text` when the current turn ends instead of steering it (sent at
+   * once when idle). Handled by the manager itself — harness-agnostic. */
+  | { type: "schedule-prompt"; text: string; images?: ChatImageRef[] }
+  /** Withdraw a scheduled prompt before it's sent. */
+  | { type: "cancel-scheduled"; id: string }
   | { type: "abort" }
   | {
       type: "ui-response";
