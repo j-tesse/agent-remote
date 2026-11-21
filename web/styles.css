@@ -531,6 +531,13 @@ body {
   background: color-mix(in srgb, var(--accent) 15%, var(--bg));
 }
 
+/* Tap toggles, long-press opens settings: suppress the touch callout/selection. */
+.header-icon-button.assistant-button {
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* AI-assistant enabled but the LLM endpoint is unreachable: make the broken
    state obvious without otherwise disrupting the UI. */
 .header-icon-button.assistant-button.unavailable {

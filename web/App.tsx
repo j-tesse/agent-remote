@@ -88,6 +88,8 @@ const DEFAULT_ASSISTANT: AssistantSettings = {
   continuity: { enabled: false, instructions: "", newSession: "after-pr" },
 };
 
+const ASSISTANT_LONG_PRESS_MS = 450;
+
 /** The checklist sections of the assistant dialog. */
 type SectionKey = "permissions" | "questions" | "autoPr" | "continuity";
 
@@ -692,15 +694,45 @@ function Workspace({
     setAssistantDialogOpen(false);
   }, [flushAssistant]);
 
-  // The button always opens the dialog: with several capabilities, editing them
-  // (and "Run now") must stay reachable while the assistant is already on.
-  // Turning everything off is now unticking the boxes.
-  const onAssistantButton = () => {
+  // Long-press / right-click opens the dialog (full checklist + "Run now").
+  const openAssistantDialog = () => {
     if (activeSessionId === null) return;
     const cur = activeAssistant ?? DEFAULT_ASSISTANT;
     // Opening must never change a setting — seed the draft verbatim.
     setAssistantDraft(cur);
     setAssistantDialogOpen(true);
+  };
+
+  // A tap toggles: on = permissions only, no wait; off = every capability off.
+  const toggleAssistant = () => {
+    if (activeSessionId === null) return;
+    const cur = activeAssistant ?? DEFAULT_ASSISTANT;
+    const next: AssistantSettings = deriveAssistantEnabled(cur)
+      ? {
+          ...cur,
+          permissions: { ...cur.permissions, enabled: false },
+          questions: { ...cur.questions, enabled: false },
+          autoPr: { ...cur.autoPr, enabled: false },
+          continuity: { ...cur.continuity, enabled: false },
+        }
+      : {
+          ...cur,
+          permissions: { ...cur.permissions, enabled: true, delayScale: 0 },
+        };
+    pushAssistant(next);
+  };
+
+  const assistantPress = useRef<number | undefined>(undefined);
+  // The press that opened the dialog must not also toggle on release.
+  const assistantPressOpened = useRef(false);
+  const cancelAssistantPress = () => {
+    window.clearTimeout(assistantPress.current);
+    assistantPress.current = undefined;
+  };
+  const assistantLongPress = () => {
+    cancelAssistantPress();
+    assistantPressOpened.current = true;
+    openAssistantDialog();
   };
 
   /** Patch one capability and apply it: at once for checkboxes, debounced for
@@ -999,17 +1031,39 @@ function Workspace({
                           : "unavailable"
                         : ""
                     }`}
-                    onClick={onAssistantButton}
+                    onPointerDown={() => {
+                      assistantPressOpened.current = false;
+                      cancelAssistantPress();
+                      assistantPress.current = window.setTimeout(
+                        assistantLongPress,
+                        ASSISTANT_LONG_PRESS_MS,
+                      );
+                    }}
+                    onPointerUp={cancelAssistantPress}
+                    onPointerLeave={cancelAssistantPress}
+                    onPointerCancel={cancelAssistantPress}
+                    // Desktop right-click, and the long-press some mobile browsers report.
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (!assistantPressOpened.current) assistantLongPress();
+                    }}
+                    onClick={() => {
+                      if (assistantPressOpened.current) {
+                        assistantPressOpened.current = false;
+                        return;
+                      }
+                      toggleAssistant();
+                    }}
                     aria-pressed={assistantEnabled}
-                    title={
+                    title={`${
                       assistantEnabled
                         ? !needsLlm
                           ? "AI assistant on — needs no LLM"
                           : llmAvailable
                             ? "AI assistant on"
                             : "AI assistant on, but the LLM is unavailable"
-                        : "AI assistant"
-                    }
+                        : "AI assistant off"
+                    } — tap to toggle, long-press (or right-click) for settings`}
                   >
                     <Icon path={ROBOT_ICON} />
                   </button>
