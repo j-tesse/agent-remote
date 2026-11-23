@@ -32,6 +32,12 @@ async function isExecutableFile(path: string): Promise<boolean> {
   }
 }
 
+/** The folder's own top-level `./restart.sh` (header restart button). */
+export const RESTART_SCRIPT = "restart.sh";
+export function hasRestartScript(cwd: string): Promise<boolean> {
+  return isExecutableFile(join(cwd, RESTART_SCRIPT));
+}
+
 async function listLocal(cwd: string): Promise<string[]> {
   let entries: string[];
   try {
