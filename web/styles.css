@@ -537,6 +537,10 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* The press must land on the button, not the SVG (iOS image callout). */
+.header-icon-button.assistant-button svg {
+  pointer-events: none;
+}
 
 /* AI-assistant enabled but the LLM endpoint is unreachable: make the broken
    state obvious without otherwise disrupting the UI. */

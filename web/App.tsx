@@ -749,7 +749,22 @@ function Workspace({
   const assistantLongPress = () => {
     cancelAssistantPress();
     assistantPressOpened.current = true;
+    // The hold may already have started selecting neighbouring text.
+    window.getSelection()?.removeAllRanges();
     openAssistantDialog();
+  };
+  // `user-select:none` on the button alone doesn't stop a long-press selecting
+  // the surrounding header text, so block selection page-wide while held.
+  const blockSelect = (e: Event) => e.preventDefault();
+  const holdNoSelect = () => {
+    document.addEventListener("selectstart", blockSelect);
+    const release = () => {
+      document.removeEventListener("selectstart", blockSelect);
+      document.removeEventListener("pointerup", release);
+      document.removeEventListener("pointercancel", release);
+    };
+    document.addEventListener("pointerup", release);
+    document.addEventListener("pointercancel", release);
   };
 
   /** Patch one capability and apply it: at once for checkboxes, debounced for
@@ -1061,6 +1076,7 @@ function Workspace({
                         : ""
                     }`}
                     onPointerDown={() => {
+                      holdNoSelect();
                       assistantPressOpened.current = false;
                       cancelAssistantPress();
                       assistantPress.current = window.setTimeout(
