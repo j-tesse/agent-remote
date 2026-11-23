@@ -12,6 +12,7 @@ import type {
   AssistantSettings,
   ContinuityNewSession,
   FolderInfo,
+  FolderMeta,
   HarnessInfo,
   ResumableSession,
   SessionInfo,
@@ -150,6 +151,9 @@ const SPARKLE_ICON =
   "M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z";
 // The Greek letter π (bar + two legs).
 const PI_ICON = "M4 5h16v3H4zM6.5 8h3v11h-3zM14.5 8h3v11h-3z";
+// Material `restart_alt` — runs the folder's `./restart.sh`.
+const RESTART_ICON =
+  "M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6 0 2.97-2.17 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93 0-4.42-3.58-8-8-8zm-6 8c0-1.65.67-3.15 1.76-4.24L6.34 7.34A7.957 7.957 0 0 0 4 13c0 4.08 3.05 7.44 7 7.93v-2.02c-2.83-.48-5-2.94-5-5.91z";
 // Material `smart_toy` (robot head) — the optional LLM UI assistant.
 const ROBOT_ICON =
   "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1-4c-.83 0-1.5-.67-1.5-1.5S14.17 10 15 10s1.5.67 1.5 1.5S15.83 13 15 13z";
@@ -480,6 +484,19 @@ function Workspace({
   useEffect(() => {
     refreshResumable();
   }, [refreshResumable, sessions]);
+  // Header restart button iff the folder has a top-level ./restart.sh.
+  const [hasRestart, setHasRestart] = useState(false);
+  useEffect(() => {
+    if (activeFolder === null) return setHasRestart(false);
+    let live = true;
+    fetch(`/api/folder-info?cwd=${encodeURIComponent(activeFolder)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info: FolderMeta | null) => live && setHasRestart(!!info?.restartScript))
+      .catch(() => live && setHasRestart(false));
+    return () => {
+      live = false;
+    };
+  }, [activeFolder, sessions]);
   // A folder switch invalidates the (per-folder) resume list; close the dialog.
   useEffect(() => {
     setResumeDialogOpen(false);
@@ -1018,6 +1035,18 @@ function Workspace({
                     title="Select text"
                   >
                     <Icon path={SELECT_ICON} />
+                  </button>
+                )}
+                {hasRestart && (
+                  <button
+                    className="header-icon-button"
+                    onClick={() => {
+                      if (window.confirm(`Run ./restart.sh in ${displayPath(activeFolder, home)}?`))
+                        client.runRestart(activeFolder);
+                    }}
+                    title="Run ./restart.sh (opens a terminal tab)"
+                  >
+                    <Icon path={RESTART_ICON} />
                   </button>
                 )}
                 {/* Optional LLM assistant: enabled → accent; enabled but the

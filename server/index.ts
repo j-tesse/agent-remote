@@ -24,7 +24,13 @@ import {
   setModelNames,
 } from "./db.js";
 import { recordChatRenders, forgetChatRenders } from "./chatLog.js";
-import { listCommands, resolveCommand, RESOLVER_IDS } from "./commands.js";
+import {
+  hasRestartScript,
+  listCommands,
+  resolveCommand,
+  RESOLVER_IDS,
+  RESTART_SCRIPT,
+} from "./commands.js";
 import {
   listDir,
   readTextFile,
@@ -69,6 +75,7 @@ import { attachSessionTools } from "./sessionTools.js";
 import type {
   ChatImageRef,
   ClientMessage,
+  FolderMeta,
   HarnessInfo,
   ServerMessage,
   ViewState,
@@ -234,6 +241,21 @@ function routeAfterAuth(req: IncomingMessage, res: ServerResponse): void {
         res.end(JSON.stringify({ message: (err as Error).message }));
       },
     );
+    return;
+  }
+  if (req.method === "GET" && url.startsWith("/api/folder-info")) {
+    if (!authedUser(req, config)) return sendUnauthorized(res);
+    const cwd = new URL(url, "http://x").searchParams.get("cwd") ?? "";
+    if (!listFolders().some((f) => f.path === cwd)) {
+      res.statusCode = 400;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ message: "Unknown folder." }));
+      return;
+    }
+    void hasRestartScript(cwd).then((restartScript) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ restartScript } satisfies FolderMeta));
+    });
     return;
   }
   if (req.method === "GET" && url.startsWith("/api/resolve")) {
@@ -761,6 +783,23 @@ wss.on("connection", (ws: WebSocket, user: string) => {
             void scaffoldContent(cwd, content).then(launch).catch((err: unknown) =>
               send({ type: "error", message: (err as Error).message }),
             );
+          break;
+        }
+        case "runRestart": {
+          // Fixed script only (never a client-supplied command), allowlisted folder.
+          const cwd = normalizeFolder(msg.cwd);
+          if (!listFolders().some((f) => f.path === cwd)) throw new Error("Unknown folder.");
+          void hasRestartScript(cwd).then((ok) => {
+            if (!ok) return send({ type: "error", message: `No ./${RESTART_SCRIPT} in this folder.` });
+            try {
+              const info = manager.start("terminal", { cwd });
+              // PTY buffers it until the shell's rc has run.
+              manager.input(info.id, `./${RESTART_SCRIPT}\r`);
+              markFolderActive(cwd);
+            } catch (err) {
+              send({ type: "error", message: (err as Error).message });
+            }
+          });
           break;
         }
         case "input": {

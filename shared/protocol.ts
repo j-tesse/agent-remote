@@ -97,6 +97,12 @@ export interface ResumableSession {
 /** Executables/commands available for the command builder, for a given cwd.
  * Returned by `GET /api/commands?cwd=…`. Purely filesystem-derived: the static
  * argument catalog for well-known commands lives client-side. */
+/** `GET /api/folder-info?cwd=` — per-folder header affordances. */
+export interface FolderMeta {
+  /** Folder has an executable top-level `./restart.sh`. */
+  restartScript: boolean;
+}
+
 export interface CommandListing {
   /** Executable files in the cwd itself (names without a leading `./`). */
   local: string[];
@@ -1091,6 +1097,8 @@ export type ClientMessage =
       content?: ContentPointer;
     }
   | { type: "input"; sessionId: string; data: string }
+  /** Open a terminal tab in `cwd` running its top-level `./restart.sh`. */
+  | { type: "runRestart"; cwd: string }
   /** Type the user's stored sudo password into a pending prompt (server-side). */
   | { type: "sudoFill"; sessionId: string; promptId: string }
   | { type: "resize"; sessionId: string; cols: number; rows: number }

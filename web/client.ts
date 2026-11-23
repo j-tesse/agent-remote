@@ -212,6 +212,9 @@ export class Client {
   ): void {
     this.send({ type: "start", harnessId, cwd, ...opts });
   }
+  runRestart(cwd: string): void {
+    this.send({ type: "runRestart", cwd });
+  }
   input(sessionId: string, data: string): void {
     if (this.ctrlMode !== "off") {
       data = applyCtrl(data);
